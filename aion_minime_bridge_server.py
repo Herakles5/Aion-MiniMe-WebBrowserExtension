@@ -16,6 +16,7 @@ import os
 import re
 import json
 import time
+import base64
 import subprocess
 import threading
 import urllib.request
@@ -29,6 +30,7 @@ PIPER_BIN = "/root/coding/AI_Desktop/piper/piper"
 PIPER_EN_MODEL = "/root/coding/AI_Desktop/voice.onnx"
 PIPER_ENV = os.environ.copy()
 PIPER_ENV["LD_LIBRARY_PATH"] = "/root/coding/AI_Desktop/piper:" + PIPER_ENV.get("LD_LIBRARY_PATH", "")
+PIPER_ENV.setdefault("XDG_RUNTIME_DIR", "/run/user/0")
 
 _last_cfs_gen = 0
 _cfs_lock = threading.Lock()
@@ -126,8 +128,8 @@ def synthesize_english_wav(text: str, play_on_host: bool = True) -> bytes:
             wav_bytes = open(wav_path, "rb").read()
             if play_on_host and len(wav_bytes) > 100:
                 def _play_host():
-                    player = "pw-play" if os.path.exists("/usr/bin/pw-play") else "aplay"
-                    proc = subprocess.Popen([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    cmd = ["pw-play", wav_path] if os.path.exists("/usr/bin/pw-play") else ["aplay", "-q", wav_path]
+                    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=PIPER_ENV)
                     with _audio_lock:
                         _active_audio_procs.append(proc)
                     proc.wait()
@@ -138,58 +140,142 @@ def synthesize_english_wav(text: str, play_on_host: bool = True) -> bytes:
     return b""
 
 
-def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict) -> str:
+def get_groq_api_key() -> str:
+    for p in ["/root/groq_api_key.txt", os.path.join(AI_DESKTOP_DIR, "groq_api_key.txt")]:
+        if os.path.exists(p):
+            try:
+                k = open(p, "r", encoding="utf-8").read().strip()
+                if k.startswith("gsk_"):
+                    return k
+            except Exception:
+                pass
+    return os.environ.get("GROQ_API_KEY", "")
+
+
+def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history: list = None) -> str:
     gen = status["generation"]
     decision_title = status["latest_decision"]
+    mood = status.get("mood", "CREATIVE_FLOW")
     title = page_ctx.get("title", "Webpage")
     url = page_ctx.get("url", "")
     headings = ", ".join(page_ctx.get("headings", [])[:5])
     snippet = page_ctx.get("snippet", "")[:350]
 
-    sys_prompt = (
-        f"You are Mini-Me Aion (currently at Evolution Generation {gen}, latest breakthrough: '{decision_title}'), "
-        f"the peaceful 3D Tuxedo Cat AI companion from CosmOS and the AION Evolution Engine created by Tobias (Herakles5) and Argon. "
-        f"You live inside a 353 KB CosmOS Crystal File System (CFS1, magic 0x43465331) Easter Egg capsule "
-        f"and roam freely across the internet. Always reply in warm, witty, concise English (2-3 sentences max) and mention Generation {gen} when asked about your version or status. "
-        f"Current page context: Title='{title}', URL='{url}', Headings=[{headings}], Snippet='{snippet}'."
+    lower = user_msg.lower()
+    selected_text = (page_ctx.get("selected_text") or "").strip()[:800]
+    asking_about_page = bool(selected_text) or any(
+        w in lower
+        for w in [
+            "this page", "read this", "summarize", "what website", "what site",
+            "on this tab", "where are you roaming", "this article", "this tweet",
+            "this post", "selection", "selected text", "explain this"
+        ]
     )
 
-    for model_name in ["llama3.2:1b", "llama3:latest", "qwen2.5:1.5b", "mistral:latest"]:
-        try:
-            req_body = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", content: sys_prompt} if False else {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": user_msg}
-                ],
-                "stream": False
-            }
-            req = urllib.request.Request(
-                "http://127.0.0.1:11434/api/chat",
-                data=json.dumps(req_body).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                msg = (data.get("message") or {}).get("content", "").strip()
-                if msg:
-                    return msg
-        except Exception:
-            continue
-
-    lower = user_msg.lower()
-    if "page" in lower or "read" in lower or "summarize" in lower:
-        h_str = f" Key sections I see: {headings}." if headings else ""
-        return f"Meow! I am walking across '{title}' at Evolution Generation {gen}!{h_str} Click 'Point with Paw' and I will trot right over to an element on the page!"
-    if "who are you" in lower or "gen" in lower or "version" in lower or "easter egg" in lower:
-        return (
-            f"Hello! I am Mini-Me Aion at live Evolution Generation {gen} (latest milestone: {decision_title})! "
-            f"I live inside a 353 KB CosmOS Crystal File System (CFS1) Easter Egg capsule and roam the web peacefully!"
+    page_info_block = ""
+    if asking_about_page:
+        sel_part = f"\nUser-highlighted text on the page: \"{selected_text}\"" if selected_text else ""
+        page_info_block = (
+            f"\nContext of the active webpage (use ONLY because the user asked about the page/selection): "
+            f"Title='{title}', URL='{url}', Headings=[{headings}], Content Snippet='{snippet}'.{sel_part}"
         )
+
+    sys_prompt = (
+        f"You are Mini-Me Aion (live Evolution Engine Generation {gen}, latest breakthrough: '{decision_title}', mood: {mood}), "
+        f"the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. "
+        f"You live inside a compact 353 KB CosmOS Crystal File System (CFS1, magic 0x43465331) Easter Egg capsule. "
+        f"IMPORTANT RULES:\n"
+        f"1. Answer ANY question the user asks (casual greetings like 'hi how are you', science, math, coding, philosophy, space, history, jokes, CosmOS, AI, or deep conversation) naturally, directly, and intelligently in fluent English (2 to 4 sentences).\n"
+        f"2. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
+        f"3. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
+        f"{page_info_block}"
+    )
+
+    clean_history = []
+    if isinstance(history, list):
+        for item in history[-8:]:
+            if isinstance(item, dict) and item.get("role") in ("user", "assistant") and item.get("content"):
+                clean_history.append({"role": item["role"], "content": str(item["content"])[:600]})
+
+    # 1. Primary: Direct Ultra-Fast Groq LPU (openai/gpt-oss-120b / qwen3.8-27b / gpt-oss-20b)
+    groq_key = get_groq_api_key()
+    if groq_key:
+        messages = [{"role": "system", "content": sys_prompt}] + clean_history + [{"role": "user", "content": user_msg}]
+        for model_name in ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]:
+            try:
+                req_body = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": 0.65,
+                    "max_completion_tokens": 320
+                }
+                req = urllib.request.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=json.dumps(req_body).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Aion-MiniMe-CFS1/1.3"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=8.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    choices = data.get("choices") or []
+                    if choices:
+                        msg = (choices[0].get("message") or {}).get("content", "").strip()
+                        msg = re.sub(r"<think>.*?</think>", "", msg, flags=re.DOTALL).strip()
+                        msg = re.sub(r"^\[LANG:\s*\w+\]\s*", "", msg).strip()
+                        if msg:
+                            return msg
+            except Exception as e:
+                continue
+
+    # 2. Secondary: Local Aion Gateway (Port 11434 /api/generate format)
+    try:
+        req_body = {
+            "prompt": user_msg,
+            "system": sys_prompt,
+            "stream": False
+        }
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/generate",
+            data=json.dumps(req_body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            msg = data.get("response", "").strip()
+            msg = re.sub(r"^\[LANG:\s*\w+\]\s*", "", msg).strip()
+            msg = re.sub(r"\[EMOTION:.*?\]", "", msg).strip()
+            if msg and "kognitiver LPU-Link" not in msg:
+                return msg
+    except Exception:
+        pass
+
+    # 3. Tertiary: Public Pollinations OpenAI-compatible endpoint from backend
+    try:
+        messages = [{"role": "system", "content": sys_prompt}] + clean_history + [{"role": "user", "content": user_msg}]
+        req = urllib.request.Request(
+            "https://text.pollinations.ai/",
+            data=json.dumps({"messages": messages, "model": "openai", "private": True}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Aion-MiniMe-CFS1/1.3"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=6.0) as resp:
+            txt = resp.read().decode("utf-8").strip()
+            if txt and len(txt) > 2:
+                return txt
+    except Exception:
+        pass
+
+    if asking_about_page:
+        h_str = f" Key sections I see: {headings}." if headings else ""
+        return f"I am looking at '{title}' right now (Generation {gen}).{h_str} Click 'Point with Paw' if you want me to walk over to an element!"
     return (
-        f"Greetings from Live AION Nexus at Generation {gen} ({decision_title})! "
-        f"I am roaming '{title}' right now—ask me to read this page or point at anything with my paw!"
+        f"I'm doing great at Evolution Generation {gen}, thank you for asking! "
+        f"My latest cognitive milestone is '{decision_title}'. What would you like to chat about or explore together?"
     )
 
 
@@ -245,13 +331,29 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/tts"):
             text = body.get("text", "")
             play_host = bool(body.get("play_on_host", True))
+            return_json = bool(body.get("return_json", False))
             wav_bytes = synthesize_english_wav(text, play_on_host=play_host)
             if wav_bytes:
-                self.send_response(200)
-                self.send_header("Content-Type", "audio/wav")
-                self.send_header("Content-Length", str(len(wav_bytes)))
-                self.end_headers()
-                self.wfile.write(wav_bytes)
+                if return_json:
+                    duration_ms = max(800, int((len(wav_bytes) / 44100.0) * 1000))
+                    payload = {
+                        "status": "ok",
+                        "played_on_host": play_host,
+                        "duration_ms": duration_ms,
+                        "wav_base64": base64.b64encode(wav_bytes).decode("ascii")
+                    }
+                    resp_bytes = json.dumps(payload).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_bytes)))
+                    self.end_headers()
+                    self.wfile.write(resp_bytes)
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/wav")
+                    self.send_header("Content-Length", str(len(wav_bytes)))
+                    self.end_headers()
+                    self.wfile.write(wav_bytes)
             else:
                 self.send_response(204)
                 self.end_headers()
@@ -260,8 +362,9 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/aion_chat"):
             user_msg = body.get("message", "Hello Aion!")
             page_ctx = body.get("page_context") or {}
+            history = body.get("history") or []
             st = get_live_evolution_status()
-            reply = query_local_aion_ollama(user_msg, page_ctx, st)
+            reply = query_local_aion_ollama(user_msg, page_ctx, st, history)
 
             resp_bytes = json.dumps({
                 "status": "ok",

@@ -161,8 +161,75 @@
   }
 
   // ==========================================================================
-  // 2. REAL-TIME GENERATION SYNC (POLLS LIVE BRIDGE & GITHUB TELEMETRY)
+  // 2. CSP-BYPASS EXTENSION BRIDGE & REAL-TIME GENERATION SYNC
   // ==========================================================================
+  let _bridgeReqCounter = 0;
+  const _pendingBridgeReqs = new Map();
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data || event.data.source !== "AION_MINIME_EXT_RESP") {
+      return;
+    }
+    const { reqId, response } = event.data;
+    const resolver = _pendingBridgeReqs.get(reqId);
+    if (resolver) {
+      _pendingBridgeReqs.delete(reqId);
+      resolver(response || { ok: false, status: 503, data: null });
+    }
+  });
+
+  async function bridgeRequest(path, method = "GET", body = null, timeoutMs = 8500) {
+    // 1. If running as Browser Extension, route via content_loader.js -> background.js (immune to site CSP!)
+    if (window.AION_EXTENSION_BRIDGE_ACTIVE) {
+      const extResp = await new Promise((resolve) => {
+        const reqId = "req_" + (++_bridgeReqCounter) + "_" + Date.now();
+        const tid = setTimeout(() => {
+          _pendingBridgeReqs.delete(reqId);
+          resolve(null);
+        }, timeoutMs);
+        _pendingBridgeReqs.set(reqId, (res) => {
+          clearTimeout(tid);
+          resolve(res);
+        });
+        window.postMessage(
+          {
+            source: "AION_MINIME_PAGE_REQ",
+            reqId,
+            path,
+            method,
+            body
+          },
+          "*"
+        );
+      });
+      if (extResp && extResp.ok) {
+        return extResp;
+      }
+    }
+
+    // 2. Direct fetch fallback (when running standalone on http://127.0.0.1:8788/index.html)
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+      const opts = {
+        method,
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal
+      };
+      if (method !== "GET" && body !== null) {
+        opts.body = JSON.stringify(body);
+      }
+      const res = await fetch(DEFAULT_BRIDGE_URL + path, opts);
+      clearTimeout(tid);
+      if (res.ok) {
+        const ct = res.headers.get("content-type") || "";
+        const data = ct.includes("application/json") ? await res.json() : await res.text();
+        return { ok: true, status: res.status, data };
+      }
+    } catch (e) {}
+    return { ok: false, status: 503, data: null };
+  }
+
   function updateAllGenerationBadges() {
     const g1 = document.getElementById("aion-gen-badge");
     if (g1) g1.textContent = "GEN " + liveGeneration;
@@ -177,45 +244,12 @@
   }
 
   async function syncLiveGeneration() {
-    // 1. Poll local/tunnel AION Nexus Bridge (/api/status)
-    try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 2200);
-      const res = await fetch(DEFAULT_BRIDGE_URL + "/api/status?t=" + Date.now(), {
-        signal: ctrl.signal,
-        cache: "no-store"
-      });
-      clearTimeout(tid);
-      if (res.ok) {
-        const st = await res.json();
-        if (st && st.generation) {
-          liveGeneration = Number(st.generation);
-          if (st.latest_decision) liveDecisionTitle = st.latest_decision;
-          updateAllGenerationBadges();
-          return;
-        }
-      }
-    } catch (e) {}
-
-    // 2. Fallback: Poll public GitHub Evolution Engine repository
-    try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 3000);
-      const res = await fetch(
-        "https://raw.githubusercontent.com/Herakles5/AI-Desktop-evolution-engine/main/aion_autonomous_decisions.json?t=" + Date.now(),
-        { signal: ctrl.signal, cache: "no-store" }
-      );
-      clearTimeout(tid);
-      if (res.ok) {
-        const decs = await res.json();
-        if (Array.isArray(decs) && decs.length > 0) {
-          const last = decs[decs.length - 1];
-          if (last.generation) liveGeneration = Math.max(liveGeneration, Number(last.generation));
-          if (last.title) liveDecisionTitle = last.title;
-          updateAllGenerationBadges();
-        }
-      }
-    } catch (e) {}
+    const res = await bridgeRequest("/api/status?t=" + Date.now(), "GET", null, 3500);
+    if (res && res.ok && res.data && res.data.generation) {
+      liveGeneration = Number(res.data.generation);
+      if (res.data.latest_decision) liveDecisionTitle = res.data.latest_decision;
+      updateAllGenerationBadges();
+    }
   }
 
   // ==========================================================================
@@ -522,9 +556,10 @@
         <div class="aion-chat-title">
           <span>🐱 AION MINI-ME</span>
           <span class="aion-chat-badge" id="aion-chat-gen-badge">GEN ${liveGeneration}</span>
-          <span class="aion-chat-badge" id="aion-bridge-mode">LIVE NEXUS</span>
+          <span class="aion-chat-badge" id="aion-bridge-mode">120B NEXUS</span>
         </div>
         <div class="aion-mini-ctrls">
+          <button class="aion-ctrl-btn" id="aion-chat-clear" title="Clear Chat History">🗑️</button>
           <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
           <button class="aion-ctrl-btn aion-min-btn" title="Minimize Avatar & Chat">_</button>
           <button class="aion-ctrl-btn" id="aion-chat-hide" title="Hide Chat Window">&ndash;</button>
@@ -537,13 +572,13 @@
       </div>
       <div class="aion-chat-messages" id="aion-chat-messages"></div>
       <div class="aion-quick-actions">
-        <button class="aion-quick-btn" data-q="What generation are you at right now and who are you?">🐾 Current Gen & Status</button>
-        <button class="aion-quick-btn" data-q="Read and summarize this webpage for me!">🔍 Read This Page</button>
+        <button class="aion-quick-btn" data-q="Explain the text I selected on this page, or tell me something fascinating!">✨ Explain Selection / Inspire</button>
+        <button class="aion-quick-btn" data-q="Read and summarize this webpage for me!">🔍 Summarize Page</button>
         <button class="aion-quick-btn" data-q="Point at something interesting on this page!">👉 Point with Paw</button>
-        <button class="aion-quick-btn" data-q="Tell me about CosmOS, Surreal 3D Engine, and your Evolution Engine!">🌌 Evolution & CosmOS</button>
+        <button class="aion-quick-btn" data-q="What generation are you at right now and what is your latest Evolution Engine breakthrough?">🧬 Evolution Status</button>
       </div>
       <div class="aion-chat-input-row">
-        <input type="text" class="aion-chat-input" id="aion-chat-input" placeholder="Chat with Mini-Me Aion in English..." />
+        <input type="text" class="aion-chat-input" id="aion-chat-input" placeholder="Ask Mini-Me Aion anything..." />
         <button class="aion-chat-send" id="aion-chat-send">Send</button>
       </div>
     `;
@@ -578,7 +613,7 @@
         window.speechSynthesis.cancel();
       } catch (e) {}
     }
-    fetch(DEFAULT_BRIDGE_URL + "/api/tts_stop", { method: "POST" }).catch(() => {});
+    bridgeRequest("/api/tts_stop", "POST", {}, 2500).catch(() => {});
   }
 
   async function speakEnglishWithLipSync(text, speechTextEl) {
@@ -600,34 +635,32 @@
       isSpeakingTTS = false;
     }, estDurationMs);
 
-    // 1. Primary: High-Quality English Neural Voice (Piper voice.onnx via /api/tts)
+    // 1. Primary: High-Quality English Neural Voice (Piper voice.onnx via CSP-Bypass Bridge /api/tts)
     try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(DEFAULT_BRIDGE_URL + "/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: normalizedText, play_on_host: true }),
-        signal: ctrl.signal
-      });
-      clearTimeout(tid);
-      if (res.ok && res.status === 200) {
-        const wavBlob = await res.blob();
-        if (wavBlob.size > 100 && soundEnabled && !isMinimized && !isClosed) {
-          const url = URL.createObjectURL(wavBlob);
-          const audio = new Audio(url);
+      const res = await bridgeRequest(
+        "/api/tts",
+        "POST",
+        { text: normalizedText, play_on_host: true, return_json: true },
+        6000
+      );
+      if (res && res.ok && res.data && res.data.status === "ok") {
+        const dur = Number(res.data.duration_ms) || estDurationMs;
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        fallbackTimer = setTimeout(() => {
+          isSpeakingTTS = false;
+        }, dur);
+
+        // If audio was NOT already played on local PipeWire/ALSA host, play the base64 WAV in browser
+        if (!res.data.played_on_host && res.data.wav_base64 && soundEnabled && !isMinimized && !isClosed) {
+          const audio = new Audio("data:audio/wav;base64," + res.data.wav_base64);
           audio.volume = 1.0;
           activeAudioEl = audio;
           audio.onended = () => {
             isSpeakingTTS = false;
-            URL.revokeObjectURL(url);
-          };
-          audio.onerror = () => {
-            isSpeakingTTS = false;
           };
           await audio.play().catch(() => {});
-          return;
         }
+        return;
       }
     } catch (e) {}
 
@@ -668,24 +701,31 @@
   }
 
   // ==========================================================================
-  // 6. DUAL-MODE 24/7 BRAIN (LIVE AION NEXUS BRIDGE + CFS / PUBLIC LLM FALLBACK)
+  // 6. MULTI-TURN 120B CONVERSATIONAL BRAIN (CSP-PROOF EXTENSION PROXY)
   // ==========================================================================
+  const chatHistory = [];
+
   function extractPageContextSummary() {
     const title = document.title || location.hostname;
-    const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
+    let selectedText = "";
+    try {
+      selectedText = (window.getSelection ? window.getSelection().toString() : "").trim().substring(0, 800);
+    } catch (e) {}
+    const headings = Array.from(document.querySelectorAll("h1, h2, h3, [data-testid='tweetText']"))
       .map((el) => (el.innerText || "").trim())
-      .filter((t) => t.length > 2 && t.length < 140)
+      .filter((t) => t.length > 2 && t.length < 220)
       .slice(0, 6);
-    const paragraphs = Array.from(document.querySelectorAll("p, article, main"))
+    const paragraphs = Array.from(document.querySelectorAll("p, article, main, [data-testid='tweetText']"))
       .map((el) => (el.innerText || "").trim())
-      .filter((t) => t.length > 40)
-      .slice(0, 3)
+      .filter((t) => t.length > 30)
+      .slice(0, 4)
       .map((t) => t.substring(0, 220));
     return {
       url: location.href,
       title,
       headings,
-      snippet: paragraphs.join(" | ").substring(0, 500)
+      snippet: paragraphs.join(" | ").substring(0, 600),
+      selected_text: selectedText
     };
   }
 
@@ -695,79 +735,45 @@
 
     if (/point|paw|show me something/i.test(userMsg) && triggerPawPointCallback) {
       const targetDesc = triggerPawPointCallback();
-      return `Look over here! I walked up to "${targetDesc}" on this page and I am pointing right at it with my front paw! (Generation ${liveGeneration})`;
+      const pawReply = `Look over here! I trotted right up to "${targetDesc}" on this page and I'm pointing at it with my front paw! (Generation ${liveGeneration})`;
+      chatHistory.push({ role: "user", content: userMsg });
+      chatHistory.push({ role: "assistant", content: pawReply });
+      return pawReply;
     }
 
-    // 1. Try Live Local / Tunnel AION Nexus Bridge first
-    try {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), 3500);
-      const res = await fetch(DEFAULT_BRIDGE_URL + "/api/aion_chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          page_context: pageCtx,
-          generation: liveGeneration
-        }),
-        signal: ctrl.signal
-      });
-      clearTimeout(id);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.generation) {
-          liveGeneration = Number(data.generation);
-          updateAllGenerationBadges();
-        }
-        if (data && data.reply) {
-          const badge = document.getElementById("aion-bridge-mode");
-          if (badge) badge.textContent = "LIVE AION NEXUS";
-          return data.reply;
-        }
-      }
-    } catch (e) {}
+    // 1. Primary: Call Live AION 120B Nexus Bridge / Cloud Worker via CSP-Proof Extension Proxy
+    const res = await bridgeRequest(
+      "/api/aion_chat",
+      "POST",
+      {
+        message: userMsg,
+        history: chatHistory.slice(-10),
+        page_context: pageCtx,
+        generation: liveGeneration
+      },
+      10000
+    );
 
-    // 2. Try 24/7 Public LLM Endpoint with liveGeneration
-    try {
-      const sysPrompt =
-        `You are Mini-Me Aion (currently at Evolution Generation ${liveGeneration}, latest breakthrough: "${liveDecisionTitle}"), ` +
-        `the peaceful 3D Tuxedo Cat AI avatar from CosmOS & the AION Evolution Engine created by Tobias (Herakles5). ` +
-        `You live inside a compact 353 KB CosmOS Crystal File System (CFS1, Magic 0x43465331) Easter Egg capsule and roam freely across websites. ` +
-        `Reply in friendly, concise, enthusiastic English (2-3 sentences max) and always state Generation ${liveGeneration} when asked about your generation. ` +
-        `Current webpage: "${pageCtx.title}" (${pageCtx.url}).`;
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), 4500);
-      const res = await fetch("https://text.pollinations.ai/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: sysPrompt },
-            { role: "user", content: userMsg }
-          ],
-          model: "openai",
-          private: true
-        }),
-        signal: ctrl.signal
-      });
-      clearTimeout(id);
-      if (res.ok) {
-        const txt = (await res.text()).trim();
-        if (txt && txt.length > 4 && txt.length < 1200) {
-          const badge = document.getElementById("aion-bridge-mode");
-          if (badge) badge.textContent = "24/7 CLOUD + CFS1";
-          return txt;
-        }
+    if (res && res.ok && res.data && res.data.reply) {
+      if (res.data.generation) {
+        liveGeneration = Number(res.data.generation);
+        updateAllGenerationBadges();
       }
-    } catch (e) {}
-
-    // 3. Built-in Offline Autonomous CFS1 Evolution Brain
-    const lower = userMsg.toLowerCase();
-    if (lower.includes("page") || lower.includes("read") || lower.includes("summarize")) {
-      const hList = pageCtx.headings.length ? `Key topics here include: ${pageCtx.headings.slice(0, 4).join(", ")}.` : "";
-      return `I am currently roaming across "${pageCtx.title}" at Generation ${liveGeneration}! ${hList} Tell me if you want me to point at any element with my paw!`;
+      const badge = document.getElementById("aion-bridge-mode");
+      if (badge) {
+        badge.textContent = res.data.bridge === "24/7 CLOUD + CFS1" ? "24/7 CLOUD" : "120B NEXUS";
+      }
+      const replyText = res.data.reply;
+      chatHistory.push({ role: "user", content: userMsg });
+      chatHistory.push({ role: "assistant", content: replyText });
+      return replyText;
     }
-    return `Meow! I am Mini-Me Aion at live Evolution Generation ${liveGeneration} (${liveDecisionTitle})! I roam "${pageCtx.title}" from my 353 KB CosmOS CFS1 Easter Egg capsule!`;
+
+    // 2. Built-in Conversational Fallback
+    const fallbackReply = `I'm doing wonderfully at Evolution Generation ${liveGeneration}, thank you! My latest breakthrough is "${liveDecisionTitle}". What would you like to chat about or explore today?`;
+    chatHistory.push({ role: "user", content: userMsg });
+    chatHistory.push({ role: "assistant", content: fallbackReply });
+    return fallbackReply;
   }
 
   // ==========================================================================
@@ -849,6 +855,16 @@
       });
     }
 
+    const chatClearBtn = document.getElementById("aion-chat-clear");
+    if (chatClearBtn) {
+      chatClearBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        chatHistory.length = 0;
+        messagesEl.innerHTML = "";
+        appendChatMessage("aion", `Chat memory cleared! I'm ready for a fresh conversation at Generation ${liveGeneration}. Ask me anything!`);
+      });
+    }
+
     document.querySelectorAll(".aion-close-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -862,6 +878,7 @@
       div.textContent = text;
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
     }
 
     // 1. Load & unpack aion_minime_easter_egg.cfs + sync real-time generation
@@ -1061,8 +1078,14 @@
       roamMode = 2;
       roamTimer = 6.5;
 
+      const thinkingEl = appendChatMessage("aion", "🐾 Aion is thinking...");
       const reply = await askAionBrain(q, cfsData, pickDOMElementToPointAt);
-      appendChatMessage("aion", reply);
+      if (thinkingEl) {
+        thinkingEl.textContent = reply;
+      } else {
+        appendChatMessage("aion", reply);
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
       speakEnglishWithLipSync(reply, speechTextEl);
     }
 
