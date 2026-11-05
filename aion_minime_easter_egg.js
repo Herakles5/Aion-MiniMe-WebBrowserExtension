@@ -21,7 +21,10 @@
 
   const CFS_SECTOR_SIZE = 512;
   const CFS_MAGIC = 0x43465331; // "CFS1"
-  const DEFAULT_BRIDGE_URL = window.AION_NEXUS_BRIDGE_URL || "http://127.0.0.1:8788";
+  const DEFAULT_BRIDGE_URL =
+    window.AION_NEXUS_BRIDGE_URL ||
+    (window.location && window.location.port === "8788" ? window.location.origin : "http://127.0.0.1:8788");
+  let lastWorkingBridgeUrl = DEFAULT_BRIDGE_URL;
 
   let liveGeneration = 5077;
   let liveDecisionTitle = "Autonomous Topological Evolution";
@@ -250,15 +253,19 @@
       }
     }
 
-    // 2. Direct fetch fallback (tries localhost 127.0.0.1:8788 and home Wi-Fi LAN 10.43.191.111:8788)
-    const directCandidates = [
-      DEFAULT_BRIDGE_URL,
-      "http://10.43.191.111:8788"
-    ];
+    // 2. Direct fetch fallback (remembers lastWorkingBridgeUrl so mobile Wi-Fi 10.43.191.111:8788 has 0ms delay!)
+    const directCandidates = Array.from(
+      new Set([
+        lastWorkingBridgeUrl,
+        DEFAULT_BRIDGE_URL,
+        "http://10.43.191.111:8788",
+        "http://127.0.0.1:8788"
+      ])
+    );
     for (const candidateBase of directCandidates) {
       try {
         const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, 3500));
+        const tid = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, 2800));
         const opts = {
           method,
           headers: { "Content-Type": "application/json" },
@@ -270,6 +277,7 @@
         const res = await fetch(candidateBase + path, opts);
         clearTimeout(tid);
         if (res.ok) {
+          lastWorkingBridgeUrl = candidateBase;
           const ct = res.headers.get("content-type") || "";
           const data = ct.includes("application/json") ? await res.json() : await res.text();
           return { ok: true, status: res.status, data };
@@ -726,18 +734,64 @@
   }
 
   // ==========================================================================
-  // 5. ENGLISH NEURAL VOICE TTS + SYNCHRONOUS JAW LIP-SYNC + INSTANT MUTE/STOP
+  // 5. ENGLISH NEURAL VOICE TTS + SYNCHRONOUS JAW LIP-SYNC + MOBILE AUDIO UNLOCK
   // ==========================================================================
   let isSpeakingTTS = false;
   let currentSpeechText = "";
   let speechStartTime = 0;
   let fallbackTimer = null;
+  let sharedAudioCtx = null;
+  let activeBufferSource = null;
+  let mobileAudioUnlocked = false;
 
-  function stopAllSpeechAudio() {
+  // Unlock WebAudio & HTML5 Audio synchronously on the very first finger tap / click on smartphones!
+  function unlockMobileAudioOnGesture() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass && !sharedAudioCtx) {
+        sharedAudioCtx = new AudioContextClass();
+      }
+      if (sharedAudioCtx && sharedAudioCtx.state === "suspended") {
+        sharedAudioCtx.resume();
+      }
+      if (!mobileAudioUnlocked && sharedAudioCtx) {
+        const buf = sharedAudioCtx.createBuffer(1, 1, 22050);
+        const src = sharedAudioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(sharedAudioCtx.destination);
+        src.start(0);
+        mobileAudioUnlocked = true;
+      }
+    } catch (e) {}
+  }
+  window.addEventListener("touchstart", unlockMobileAudioOnGesture, { passive: true });
+  window.addEventListener("touchend", unlockMobileAudioOnGesture, { passive: true });
+  window.addEventListener("click", unlockMobileAudioOnGesture, { passive: true });
+
+  function isRemoteOrMobileClient() {
+    const host = (window.location && window.location.hostname) || "";
+    if (host && host !== "127.0.0.1" && host !== "localhost") {
+      // e.g. opened via http://10.43.191.111:8788 on smartphone or any external website
+      if (window.location.port === "8788") return true;
+    }
+    if ((navigator.maxTouchPoints && navigator.maxTouchPoints > 0) || "ontouchstart" in window) {
+      return true;
+    }
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+  }
+
+  function stopAllSpeechAudio(notifyBridge = true) {
     isSpeakingTTS = false;
     if (fallbackTimer) {
       clearTimeout(fallbackTimer);
       fallbackTimer = null;
+    }
+    if (activeBufferSource) {
+      try {
+        activeBufferSource.stop();
+        activeBufferSource.disconnect();
+      } catch (e) {}
+      activeBufferSource = null;
     }
     if (activeAudioEl) {
       try {
@@ -751,7 +805,56 @@
         window.speechSynthesis.cancel();
       } catch (e) {}
     }
-    bridgeRequest("/api/tts_stop", "POST", {}, 2500).catch(() => {});
+    if (notifyBridge) {
+      bridgeRequest("/api/tts_stop", "POST", {}, 2000).catch(() => {});
+    }
+  }
+
+  async function playBase64WavInBrowser(wavBase64) {
+    // 1. Try unlocked WebAudio AudioContext first (100% immune to mobile async autoplay blocks!)
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass && !sharedAudioCtx) {
+        sharedAudioCtx = new AudioContextClass();
+      }
+      if (sharedAudioCtx) {
+        if (sharedAudioCtx.state === "suspended") {
+          await sharedAudioCtx.resume();
+        }
+        const binStr = atob(wavBase64);
+        const len = binStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binStr.charCodeAt(i);
+        }
+        const audioBuffer = await sharedAudioCtx.decodeAudioData(bytes.buffer.slice(0));
+        const source = sharedAudioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(sharedAudioCtx.destination);
+        activeBufferSource = source;
+        source.onended = () => {
+          if (activeBufferSource === source) {
+            isSpeakingTTS = false;
+            activeBufferSource = null;
+          }
+        };
+        source.start(0);
+        return true;
+      }
+    } catch (err) {}
+
+    // 2. Fallback to HTML5 Audio element
+    try {
+      const audio = new Audio("data:audio/wav;base64," + wavBase64);
+      audio.volume = 1.0;
+      activeAudioEl = audio;
+      audio.onended = () => {
+        isSpeakingTTS = false;
+      };
+      await audio.play();
+      return true;
+    } catch (err) {}
+    return false;
   }
 
   async function speakEnglishWithLipSync(text, speechTextEl) {
@@ -763,7 +866,9 @@
       speechTextEl.textContent = normalizedText;
     }
 
-    stopAllSpeechAudio();
+    unlockMobileAudioOnGesture();
+    // Stop any previous local audio without sending a racing /api/tts_stop that could kill our new /api/tts!
+    stopAllSpeechAudio(false);
     if (!soundEnabled || isMinimized || isClosed) return;
 
     speechStartTime = performance.now() * 0.001;
@@ -774,12 +879,12 @@
     }, estDurationMs);
 
     // 1. Primary: High-Quality English Neural Voice (Piper voice.onnx via CSP-Bypass Bridge /api/tts)
-    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
+    const onMobileOrRemote = isRemoteOrMobileClient();
     try {
       const res = await bridgeRequest(
         "/api/tts",
         "POST",
-        { text: normalizedText, play_on_host: !isMobileDevice, return_json: true },
+        { text: normalizedText, play_on_host: !onMobileOrRemote, return_json: true },
         6000
       );
       if (res && res.ok && res.data && res.data.status === "ok") {
@@ -789,17 +894,13 @@
           isSpeakingTTS = false;
         }, dur);
 
-        // If on smartphone or audio was NOT already played on local PipeWire/ALSA host, play the base64 WAV in browser
-        if ((isMobileDevice || !res.data.played_on_host) && res.data.wav_base64 && soundEnabled && !isMinimized && !isClosed) {
-          const audio = new Audio("data:audio/wav;base64," + res.data.wav_base64);
-          audio.volume = 1.0;
-          activeAudioEl = audio;
-          audio.onended = () => {
-            isSpeakingTTS = false;
-          };
-          await audio.play().catch(() => {});
+        // Always play the neural WAV in the browser on smartphones / Wi-Fi clients (or if host playback wasn't used)
+        if ((onMobileOrRemote || !res.data.played_on_host) && res.data.wav_base64 && soundEnabled && !isMinimized && !isClosed) {
+          const played = await playBase64WavInBrowser(res.data.wav_base64);
+          if (played) return;
+        } else {
+          return;
         }
-        return;
       }
     } catch (e) {}
 
