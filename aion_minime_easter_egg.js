@@ -250,26 +250,32 @@
       }
     }
 
-    // 2. Direct fetch fallback (when running standalone on http://127.0.0.1:8788/index.html)
-    try {
-      const ctrl = new AbortController();
-      const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-      const opts = {
-        method,
-        headers: { "Content-Type": "application/json" },
-        signal: ctrl.signal
-      };
-      if (method !== "GET" && body !== null) {
-        opts.body = JSON.stringify(body);
-      }
-      const res = await fetch(DEFAULT_BRIDGE_URL + path, opts);
-      clearTimeout(tid);
-      if (res.ok) {
-        const ct = res.headers.get("content-type") || "";
-        const data = ct.includes("application/json") ? await res.json() : await res.text();
-        return { ok: true, status: res.status, data };
-      }
-    } catch (e) {}
+    // 2. Direct fetch fallback (tries localhost 127.0.0.1:8788 and home Wi-Fi LAN 10.43.191.111:8788)
+    const directCandidates = [
+      DEFAULT_BRIDGE_URL,
+      "http://10.43.191.111:8788"
+    ];
+    for (const candidateBase of directCandidates) {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, 3500));
+        const opts = {
+          method,
+          headers: { "Content-Type": "application/json" },
+          signal: ctrl.signal
+        };
+        if (method !== "GET" && body !== null) {
+          opts.body = JSON.stringify(body);
+        }
+        const res = await fetch(candidateBase + path, opts);
+        clearTimeout(tid);
+        if (res.ok) {
+          const ct = res.headers.get("content-type") || "";
+          const data = ct.includes("application/json") ? await res.json() : await res.text();
+          return { ok: true, status: res.status, data };
+        }
+      } catch (e) {}
+    }
     return { ok: false, status: 503, data: null };
   }
 
@@ -598,6 +604,21 @@
         cursor: pointer !important;
         font-size: 13px !important;
       }
+      @media (max-width: 640px) {
+        #aion-minime-chatbox {
+          width: calc(100vw - 20px) !important;
+          right: 10px !important;
+          bottom: 10px !important;
+        }
+        #aion-minime-speech {
+          max-width: 86vw !important;
+          min-width: 210px !important;
+          font-size: 11.5px !important;
+        }
+        .aion-chat-messages {
+          height: 190px !important;
+        }
+      }
     `;
     document.head.appendChild(style);
 
@@ -753,11 +774,12 @@
     }, estDurationMs);
 
     // 1. Primary: High-Quality English Neural Voice (Piper voice.onnx via CSP-Bypass Bridge /api/tts)
+    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
     try {
       const res = await bridgeRequest(
         "/api/tts",
         "POST",
-        { text: normalizedText, play_on_host: true, return_json: true },
+        { text: normalizedText, play_on_host: !isMobileDevice, return_json: true },
         6000
       );
       if (res && res.ok && res.data && res.data.status === "ok") {
@@ -767,8 +789,8 @@
           isSpeakingTTS = false;
         }, dur);
 
-        // If audio was NOT already played on local PipeWire/ALSA host, play the base64 WAV in browser
-        if (!res.data.played_on_host && res.data.wav_base64 && soundEnabled && !isMinimized && !isClosed) {
+        // If on smartphone or audio was NOT already played on local PipeWire/ALSA host, play the base64 WAV in browser
+        if ((isMobileDevice || !res.data.played_on_host) && res.data.wav_base64 && soundEnabled && !isMinimized && !isClosed) {
           const audio = new Audio("data:audio/wav;base64," + res.data.wav_base64);
           audio.volume = 1.0;
           activeAudioEl = audio;
@@ -1499,18 +1521,28 @@
     let speechOrigX = 0;
     let speechOrigY = 0;
 
-    ui.speech.addEventListener("mousedown", (e) => {
+    function getEvtCoords(e) {
+      if (e.touches && e.touches.length > 0) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+      return { x: e.clientX, y: e.clientY };
+    }
+
+    function startSpeechDrag(e) {
       if (e.target && e.target.closest("button")) return;
+      const pt = getEvtCoords(e);
       isDraggingSpeech = true;
       speechDragMoved = false;
-      speechDragStartX = e.clientX;
-      speechDragStartY = e.clientY;
+      speechDragStartX = pt.x;
+      speechDragStartY = pt.y;
       const r = ui.speech.getBoundingClientRect();
       speechOrigX = r.left + r.width * 0.5;
       speechOrigY = r.bottom;
       ui.speech.classList.add("dragging");
-      e.preventDefault();
-    });
+      if (e.type === "mousedown") e.preventDefault();
+    }
+    ui.speech.addEventListener("mousedown", startSpeechDrag);
+    ui.speech.addEventListener("touchstart", startSpeechDrag, { passive: true });
 
     // 2. Make Chat Console draggable via its header bar
     let isDraggingChat = false;
@@ -1520,16 +1552,19 @@
     let chatOrigTop = 0;
     const chatHeaderEl = ui.chatbox.querySelector(".aion-chat-header");
     if (chatHeaderEl) {
-      chatHeaderEl.addEventListener("mousedown", (e) => {
+      const startChatDrag = (e) => {
         if (e.target && e.target.closest("button")) return;
+        const pt = getEvtCoords(e);
         isDraggingChat = true;
-        chatDragStartX = e.clientX;
-        chatDragStartY = e.clientY;
+        chatDragStartX = pt.x;
+        chatDragStartY = pt.y;
         const r = ui.chatbox.getBoundingClientRect();
         chatOrigLeft = r.left;
         chatOrigTop = r.top;
-        e.preventDefault();
-      });
+        if (e.type === "mousedown") e.preventDefault();
+      };
+      chatHeaderEl.addEventListener("mousedown", startChatDrag);
+      chatHeaderEl.addEventListener("touchstart", startChatDrag, { passive: true });
     }
 
     // 3. Make 3D Cat draggable via hitbox (click without drag opens chat)
@@ -1540,32 +1575,37 @@
     let catOrigX = 0;
     let catOrigY = 0;
 
-    ui.hitbox.addEventListener("mousedown", (e) => {
+    function startCatDrag(e) {
+      const pt = getEvtCoords(e);
       isDraggingCat = true;
       catDragMoved = false;
-      catDragStartX = e.clientX;
-      catDragStartY = e.clientY;
+      catDragStartX = pt.x;
+      catDragStartY = pt.y;
       catOrigX = screenX;
       catOrigY = screenY;
-      e.preventDefault();
-    });
+      if (e.type === "mousedown") e.preventDefault();
+    }
+    ui.hitbox.addEventListener("mousedown", startCatDrag);
+    ui.hitbox.addEventListener("touchstart", startCatDrag, { passive: true });
 
-    window.addEventListener("mousemove", (e) => {
+    function onGlobalPointerMove(e) {
+      if (!isDraggingSpeech && !isDraggingChat && !isDraggingCat) return;
+      const pt = getEvtCoords(e);
       if (isDraggingSpeech) {
-        const dx = e.clientX - speechDragStartX;
-        const dy = e.clientY - speechDragStartY;
+        const dx = pt.x - speechDragStartX;
+        const dy = pt.y - speechDragStartY;
         if (Math.hypot(dx, dy) > 4) speechDragMoved = true;
         speechPinned = true;
-        speechPinX = Math.max(140, Math.min(window.innerWidth - 140, speechOrigX + dx));
+        speechPinX = Math.max(120, Math.min(window.innerWidth - 120, speechOrigX + dx));
         speechPinY = Math.max(48, Math.min(window.innerHeight - 12, speechOrigY + dy));
         ui.speech.style.left = `${speechPinX}px`;
         ui.speech.style.top = `${speechPinY}px`;
         updateSpeechPinBadge();
       }
       if (isDraggingChat) {
-        const dx = e.clientX - chatDragStartX;
-        const dy = e.clientY - chatDragStartY;
-        const newLeft = Math.max(8, Math.min(window.innerWidth - 385, chatOrigLeft + dx));
+        const dx = pt.x - chatDragStartX;
+        const dy = pt.y - chatDragStartY;
+        const newLeft = Math.max(8, Math.min(window.innerWidth - 320, chatOrigLeft + dx));
         const newTop = Math.max(8, Math.min(window.innerHeight - 120, chatOrigTop + dy));
         ui.chatbox.style.setProperty("left", `${newLeft}px`, "important");
         ui.chatbox.style.setProperty("top", `${newTop}px`, "important");
@@ -1573,21 +1613,23 @@
         ui.chatbox.style.setProperty("bottom", "auto", "important");
       }
       if (isDraggingCat) {
-        const dx = e.clientX - catDragStartX;
-        const dy = e.clientY - catDragStartY;
+        const dx = pt.x - catDragStartX;
+        const dy = pt.y - catDragStartY;
         if (Math.hypot(dx, dy) > 5) catDragMoved = true;
         if (catDragMoved) {
-          screenX = Math.max(80, Math.min(window.innerWidth - 80, catOrigX + dx));
-          screenY = Math.max(110, Math.min(window.innerHeight - 80, catOrigY + dy));
+          screenX = Math.max(60, Math.min(window.innerWidth - 60, catOrigX + dx));
+          screenY = Math.max(100, Math.min(window.innerHeight - 70, catOrigY + dy));
           targetX = screenX;
           targetY = screenY;
           roamMode = 2;
           roamTimer = 8.0;
         }
       }
-    });
+    }
+    window.addEventListener("mousemove", onGlobalPointerMove);
+    window.addEventListener("touchmove", onGlobalPointerMove, { passive: true });
 
-    window.addEventListener("mouseup", () => {
+    function onGlobalPointerEnd() {
       if (isDraggingSpeech) {
         isDraggingSpeech = false;
         ui.speech.classList.remove("dragging");
@@ -1603,7 +1645,9 @@
       if (isDraggingCat) {
         isDraggingCat = false;
       }
-    });
+    }
+    window.addEventListener("mouseup", onGlobalPointerEnd);
+    window.addEventListener("touchend", onGlobalPointerEnd);
 
     ui.hitbox.addEventListener("click", () => {
       if (!catDragMoved) triggerGreetingAndOpenChat();

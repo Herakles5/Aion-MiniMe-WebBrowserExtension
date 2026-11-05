@@ -7,35 +7,50 @@
  * and HTTPS Mixed-Content restrictions on sites like x.com, github.com, youtube.com, etc.
  */
 
-const BRIDGE_BASE = "http://127.0.0.1:8788";
+const BRIDGE_CANDIDATES = [
+  "http://127.0.0.1:8788",
+  "http://10.43.191.111:8788"
+];
+let activeBridgeBase = BRIDGE_CANDIDATES[0];
 
 async function handleBridgeFetch(msg) {
   const path = msg.path || "/api/status";
   const method = msg.method || "GET";
   const bodyObj = msg.body || null;
 
-  // 1. Primary: Local AION Nexus Bridge Server (Port 8788)
-  try {
-    const opts = {
-      method,
-      headers: { "Content-Type": "application/json" }
-    };
-    if (method !== "GET" && bodyObj !== null) {
-      opts.body = JSON.stringify(bodyObj);
-    }
-    const res = await fetch(BRIDGE_BASE + path, opts);
-    if (res.ok) {
-      const ct = res.headers.get("content-type") || "";
-      if (ct.includes("application/json")) {
-        const data = await res.json();
-        return { ok: true, status: res.status, data };
-      } else {
-        const txt = await res.text();
-        return { ok: true, status: res.status, data: txt };
+  // 1. Primary: Local or Wi-Fi LAN AION Nexus Bridge Server (Port 8788)
+  const orderedBases = [
+    activeBridgeBase,
+    ...BRIDGE_CANDIDATES.filter((b) => b !== activeBridgeBase)
+  ];
+  for (const base of orderedBases) {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 3500);
+      const opts = {
+        method,
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal
+      };
+      if (method !== "GET" && bodyObj !== null) {
+        opts.body = JSON.stringify(bodyObj);
       }
+      const res = await fetch(base + path, opts);
+      clearTimeout(tid);
+      if (res.ok) {
+        activeBridgeBase = base;
+        const ct = res.headers.get("content-type") || "";
+        if (ct.includes("application/json")) {
+          const data = await res.json();
+          return { ok: true, status: res.status, data };
+        } else {
+          const txt = await res.text();
+          return { ok: true, status: res.status, data: txt };
+        }
+      }
+    } catch (err) {
+      // Try next candidate or cloud fallback
     }
-  } catch (err) {
-    // Local port 8788 unreachable; use cloud fallbacks below
   }
 
   // 2. Cloud Fallback for /api/status (GitHub Raw Telemetry)
