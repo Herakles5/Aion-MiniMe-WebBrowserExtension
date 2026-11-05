@@ -742,36 +742,57 @@
   let fallbackTimer = null;
   let sharedAudioCtx = null;
   let activeBufferSource = null;
-  let mobileAudioUnlocked = false;
+  let sharedHtmlAudio = null;
+  const SILENT_WAV_URI = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
-  // Unlock WebAudio & HTML5 Audio synchronously on the very first finger tap / click on smartphones!
+  function getOrCreateSharedHtmlAudio() {
+    if (!sharedHtmlAudio) {
+      sharedHtmlAudio = document.createElement("audio");
+      sharedHtmlAudio.id = "aion-minime-voice-player";
+      sharedHtmlAudio.setAttribute("playsinline", "true");
+      sharedHtmlAudio.setAttribute("webkit-playsinline", "true");
+      sharedHtmlAudio.preload = "auto";
+      sharedHtmlAudio.volume = 1.0;
+      sharedHtmlAudio.style.display = "none";
+      (document.body || document.documentElement).appendChild(sharedHtmlAudio);
+    }
+    return sharedHtmlAudio;
+  }
+
+  // Unlock WebAudio & HTML5 Audio synchronously on finger-up / click on smartphones!
   function unlockMobileAudioOnGesture() {
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass && !sharedAudioCtx) {
         sharedAudioCtx = new AudioContextClass();
       }
-      if (sharedAudioCtx && sharedAudioCtx.state === "suspended") {
-        sharedAudioCtx.resume();
-      }
-      if (!mobileAudioUnlocked && sharedAudioCtx) {
+      if (sharedAudioCtx && sharedAudioCtx.state !== "running") {
+        sharedAudioCtx.resume().catch(() => {});
         const buf = sharedAudioCtx.createBuffer(1, 1, 22050);
         const src = sharedAudioCtx.createBufferSource();
         src.buffer = buf;
         src.connect(sharedAudioCtx.destination);
         src.start(0);
-        mobileAudioUnlocked = true;
+      }
+      const el = getOrCreateSharedHtmlAudio();
+      if (!isSpeakingTTS && el.paused && !el.dataset.unlocked) {
+        el.src = SILENT_WAV_URI;
+        const p = el.play();
+        if (p && p.then) {
+          p.then(() => {
+            el.dataset.unlocked = "1";
+          }).catch(() => {});
+        }
       }
     } catch (e) {}
   }
-  window.addEventListener("touchstart", unlockMobileAudioOnGesture, { passive: true });
   window.addEventListener("touchend", unlockMobileAudioOnGesture, { passive: true });
+  window.addEventListener("pointerup", unlockMobileAudioOnGesture, { passive: true });
   window.addEventListener("click", unlockMobileAudioOnGesture, { passive: true });
 
   function isRemoteOrMobileClient() {
     const host = (window.location && window.location.hostname) || "";
     if (host && host !== "127.0.0.1" && host !== "localhost") {
-      // e.g. opened via http://10.43.191.111:8788 on smartphone or any external website
       if (window.location.port === "8788") return true;
     }
     if ((navigator.maxTouchPoints && navigator.maxTouchPoints > 0) || "ontouchstart" in window) {
@@ -793,6 +814,11 @@
       } catch (e) {}
       activeBufferSource = null;
     }
+    if (sharedHtmlAudio) {
+      try {
+        sharedHtmlAudio.pause();
+      } catch (e) {}
+    }
     if (activeAudioEl) {
       try {
         activeAudioEl.pause();
@@ -811,14 +837,27 @@
   }
 
   async function playBase64WavInBrowser(wavBase64) {
-    // 1. Try unlocked WebAudio AudioContext first (100% immune to mobile async autoplay blocks!)
+    // 1. Try persistent unlocked HTML5 <audio> element first (plays through smartphone media speaker!)
+    try {
+      const el = getOrCreateSharedHtmlAudio();
+      el.src = "data:audio/wav;base64," + wavBase64;
+      el.volume = 1.0;
+      el.onended = () => {
+        isSpeakingTTS = false;
+      };
+      await el.play();
+      el.dataset.unlocked = "1";
+      return true;
+    } catch (err) {}
+
+    // 2. Fallback to manual 16-bit PCM WAV decode on unlocked WebAudio AudioContext
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (AudioContextClass && !sharedAudioCtx) {
         sharedAudioCtx = new AudioContextClass();
       }
       if (sharedAudioCtx) {
-        if (sharedAudioCtx.state === "suspended") {
+        if (sharedAudioCtx.state !== "running") {
           await sharedAudioCtx.resume();
         }
         const binStr = atob(wavBase64);
@@ -827,32 +866,30 @@
         for (let i = 0; i < len; i++) {
           bytes[i] = binStr.charCodeAt(i);
         }
-        const audioBuffer = await sharedAudioCtx.decodeAudioData(bytes.buffer.slice(0));
-        const source = sharedAudioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(sharedAudioCtx.destination);
-        activeBufferSource = source;
-        source.onended = () => {
-          if (activeBufferSource === source) {
-            isSpeakingTTS = false;
-            activeBufferSource = null;
+        const dv = new DataView(bytes.buffer);
+        const sampleRate = len > 28 ? dv.getUint32(24, true) || 22050 : 22050;
+        const pcmByteLen = Math.max(0, len - 44);
+        const numSamples = Math.floor(pcmByteLen / 2);
+        if (numSamples > 0) {
+          const audioBuffer = sharedAudioCtx.createBuffer(1, numSamples, sampleRate);
+          const chan = audioBuffer.getChannelData(0);
+          for (let i = 0; i < numSamples; i++) {
+            chan[i] = dv.getInt16(44 + i * 2, true) / 32768.0;
           }
-        };
-        source.start(0);
-        return true;
+          const source = sharedAudioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(sharedAudioCtx.destination);
+          activeBufferSource = source;
+          source.onended = () => {
+            if (activeBufferSource === source) {
+              isSpeakingTTS = false;
+              activeBufferSource = null;
+            }
+          };
+          source.start(0);
+          return true;
+        }
       }
-    } catch (err) {}
-
-    // 2. Fallback to HTML5 Audio element
-    try {
-      const audio = new Audio("data:audio/wav;base64," + wavBase64);
-      audio.volume = 1.0;
-      activeAudioEl = audio;
-      audio.onended = () => {
-        isSpeakingTTS = false;
-      };
-      await audio.play();
-      return true;
     } catch (err) {}
     return false;
   }
@@ -866,8 +903,7 @@
       speechTextEl.textContent = normalizedText;
     }
 
-    unlockMobileAudioOnGesture();
-    // Stop any previous local audio without sending a racing /api/tts_stop that could kill our new /api/tts!
+    // Stop any previous local audio without sending a racing /api/tts_stop
     stopAllSpeechAudio(false);
     if (!soundEnabled || isMinimized || isClosed) return;
 
@@ -878,8 +914,28 @@
       isSpeakingTTS = false;
     }, estDurationMs);
 
-    // 1. Primary: High-Quality English Neural Voice (Piper voice.onnx via CSP-Bypass Bridge /api/tts)
     const onMobileOrRemote = isRemoteOrMobileClient();
+
+    // 1A. Fast Synchronous HTML5 Audio Stream on Mobile Wi-Fi (0 awaits before .play() = 100% allowed by mobile browsers!)
+    if (onMobileOrRemote && window.location && window.location.port === "8788") {
+      try {
+        const el = getOrCreateSharedHtmlAudio();
+        const streamUrl =
+          `${window.location.origin}/api/tts_stream?text=${encodeURIComponent(normalizedText)}&play_on_host=0&t=${Date.now()}`;
+        el.src = streamUrl;
+        el.volume = 1.0;
+        el.onended = () => {
+          isSpeakingTTS = false;
+        };
+        await el.play();
+        el.dataset.unlocked = "1";
+        return;
+      } catch (streamErr) {
+        // Fall through to POST /api/tts + WebAudio PCM buffer below
+      }
+    }
+
+    // 1B. Primary: High-Quality English Neural Voice (Piper voice.onnx via CSP-Bypass Bridge /api/tts)
     try {
       const res = await bridgeRequest(
         "/api/tts",
@@ -1541,8 +1597,9 @@
       return "the center of the page";
     }
 
-    async function triggerGreetingAndOpenChat() {
-      await syncLiveGeneration();
+    function triggerGreetingAndOpenChat() {
+      // Do NOT await before speakEnglishWithLipSync so mobile browsers keep the synchronous click gesture token!
+      syncLiveGeneration().catch(() => {});
       roamMode = 2;
       roamTimer = 7.0;
       pointPawSide = 0;

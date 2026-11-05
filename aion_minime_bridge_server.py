@@ -594,6 +594,23 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_bytes)
             return
+        if self.path.startswith("/api/tts_stream"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            text = (qs.get("text") or [""])[0]
+            play_host = (qs.get("play_on_host") or ["0"])[0] == "1"
+            wav_bytes = synthesize_english_wav(text, play_on_host=play_host)
+            if wav_bytes:
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Length", str(len(wav_bytes)))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+                self.wfile.write(wav_bytes)
+            else:
+                self.send_response(204)
+                self.end_headers()
+            return
         super().do_GET()
 
     def do_POST(self):
