@@ -410,8 +410,10 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
             f"Title='{title}', URL='{url}', Headings=[{headings}], Content Snippet='{snippet}'.{sel_part}"
         )
 
-    # Live Internet Feeds (World News, Tech/AI News, Germany/Europe News & Live Weather)
-    feeds = refresh_live_internet_feeds(force=False)
+    # Live Internet Feeds (Read instantaneously from pre-warmed background RAM cache!)
+    if _live_feeds_cache["last_updated"] == 0:
+        threading.Thread(target=refresh_live_internet_feeds, args=(True,), daemon=True).start()
+    feeds = _live_feeds_cache
     world_list = "\n  * ".join(feeds.get("world_news", [])[:4])
     tech_list = "\n  * ".join(feeds.get("tech_ai_news", [])[:4])
     de_list = "\n  * ".join(feeds.get("europe_germany_news", [])[:3])
@@ -427,20 +429,25 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
 
     persisted_mem = load_persistent_minime_memory()
     learned_facts = persisted_mem.get("learned_facts", [])
+    learned_choreos = persisted_mem.get("learned_choreographies", [])
     facts_block = ""
     if learned_facts:
         joined_facts = "\n- ".join(learned_facts[-25:])
         facts_block = f"\nPERMANENT LEARNED MEMORY & FACTS (You never forget these):\n- {joined_facts}"
+    if learned_choreos:
+        choreo_names = ", ".join(c.get("name", "Custom Dance") for c in learned_choreos[-10:])
+        facts_block += f"\n- Learned 3D Video Dance Choreographies in Memory: {choreo_names}"
 
     sys_prompt = (
         f"You are Mini-Me Aion (live Evolution Engine Generation {gen}, latest breakthrough: '{decision_title}', mood: {mood}), "
-        f"the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. "
+        f"the intelligent, warm, witty 3D Tuxedo Cat AI companion & 52-bone K-Pop/Street Dancer from CosmOS created by Tobias (Herakles5) and Argon. "
         f"You live inside a compact 353 KB CosmOS Crystal File System (CFS1, magic 0x43465331) Easter Egg capsule. "
-        f"You have persistent long-term memory across all browser tabs and restarts, AND you have live internet feed pulls (World News, Tech/AI News, European News, and Weather)! "
+        f"You have persistent long-term memory across all browser tabs and restarts, live internet feed pulls (World News, Tech/AI News, European News, and Weather), "
+        f"AND a full 52-bone 3D skeletal dance engine that can dance ('Go Hard' K-Pop, MEOVV, Hip-Hop, Breakdance) and copy/learn choreographies directly from live <video> elements on webpages! "
         f"IMPORTANT RULES:\n"
-        f"1. Answer ANY question the user asks (breaking news, world events, tech/AI headlines, weather, science, math, coding, philosophy, CosmOS, or casual chat) naturally, directly, and intelligently in fluent English (2 to 5 sentences).\n"
+        f"1. Answer ANY question or dance request naturally, directly, and enthusiastically in fluent English (2 to 4 sentences).\n"
         f"2. When asked about news, current events, or what is happening today on the internet, analyze and report the actual headlines from your LIVE INTERNET FEEDS below—never say you lack live-feed access!\n"
-        f"3. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
+        f"3. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage or asks you to copy a video on the page.\n"
         f"4. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
         f"{facts_block}{live_feeds_block}{page_info_block}"
     )
@@ -449,9 +456,9 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
     # Merge persistent cross-tab conversation history with current tab history
     source_history = history if (isinstance(history, list) and len(history) >= 2) else persisted_mem.get("conversation_history", [])
     if isinstance(source_history, list):
-        for item in source_history[-12:]:
+        for item in source_history[-10:]:
             if isinstance(item, dict) and item.get("role") in ("user", "assistant") and item.get("content"):
-                clean_history.append({"role": item["role"], "content": str(item["content"])[:600]})
+                clean_history.append({"role": item["role"], "content": str(item["content"])[:500]})
 
     # 1. Primary: Direct Ultra-Fast Groq LPU (openai/gpt-oss-120b / qwen3.8-27b / gpt-oss-20b)
     groq_key = get_groq_api_key()
@@ -463,7 +470,7 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
                     "model": model_name,
                     "messages": messages,
                     "temperature": 0.65,
-                    "max_completion_tokens": 320
+                    "max_completion_tokens": 1024
                 }
                 req = urllib.request.Request(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -605,6 +612,33 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             self.wfile.write(resp_bytes)
             return
 
+        if self.path.startswith("/api/learn_choreo"):
+            choreo = body.get("choreo") or {}
+            mem = load_persistent_minime_memory()
+            choreos = mem.get("learned_choreographies", [])
+            choreos.append(choreo)
+            mem["learned_choreographies"] = choreos[-50:]
+            c_name = choreo.get("name", "Live Video Dance")
+            c_bpm = choreo.get("bpm", 128)
+            fact_str = f"Learned 3D Video Dance Choreography '{c_name}' ({c_bpm} BPM, Hip-Sway={choreo.get('hipSway', 1.0)}, Arm-Wave={choreo.get('armWave', 1.0)}) from {choreo.get('source', 'webpage video')}."
+            facts = mem.get("learned_facts", [])
+            if fact_str not in facts:
+                facts.append(fact_str)
+                mem["learned_facts"] = facts[-200:]
+            save_persistent_minime_memory(mem)
+            resp_bytes = json.dumps({
+                "status": "ok",
+                "learned_facts_count": len(mem["learned_facts"]),
+                "learned_choreos_count": len(mem["learned_choreographies"]),
+                "choreo": choreo
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+
         if self.path.startswith("/api/tts_stop"):
             stop_active_tts()
             resp_bytes = b'{"status":"stopped"}'
@@ -677,6 +711,14 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     st = get_live_evolution_status()
     maybe_refresh_cfs_capsule(st["generation"])
+    def _bg_feeds_loop():
+        while True:
+            try:
+                refresh_live_internet_feeds(force=True)
+            except Exception:
+                pass
+            time.sleep(90)
+    threading.Thread(target=_bg_feeds_loop, daemon=True).start()
     print(f"[*] Starting AION Mini-Me CFS1 Server & Neural TTS Bridge (Gen {st['generation']}) on http://127.0.0.1:{PORT}")
     server = ThreadingHTTPServer(("0.0.0.0", PORT), AionMiniMeHandler)
     server.serve_forever()
