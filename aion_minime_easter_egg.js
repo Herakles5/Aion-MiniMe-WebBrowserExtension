@@ -31,6 +31,10 @@
   let activeAudioEl = null;
 
   function getAssetUrl(filename) {
+    const domBase = document.documentElement.getAttribute("data-aion-base-url");
+    if (domBase) {
+      return domBase.replace(/\/$/, "") + "/" + filename;
+    }
     if (window.AION_MINIME_BASE_URL) {
       return window.AION_MINIME_BASE_URL.replace(/\/$/, "") + "/" + filename;
     }
@@ -132,6 +136,7 @@
       evolutionMind = JSON.parse(new TextDecoder("utf-8").decode(mindBytes));
       if (evolutionMind && evolutionMind.generation) {
         liveGeneration = Math.max(liveGeneration, Number(evolutionMind.generation));
+        updateAllGenerationBadges();
       }
     }
 
@@ -180,7 +185,10 @@
 
   async function bridgeRequest(path, method = "GET", body = null, timeoutMs = 8500) {
     // 1. If running as Browser Extension, route via content_loader.js -> background.js (immune to site CSP!)
-    if (window.AION_EXTENSION_BRIDGE_ACTIVE) {
+    const hasExtBridge =
+      document.documentElement.getAttribute("data-aion-ext-bridge") === "1" ||
+      Boolean(window.AION_EXTENSION_BRIDGE_ACTIVE);
+    if (hasExtBridge) {
       const extResp = await new Promise((resolve) => {
         const reqId = "req_" + (++_bridgeReqCounter) + "_" + Date.now();
         const tid = setTimeout(() => {

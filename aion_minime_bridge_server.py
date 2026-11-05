@@ -180,6 +180,22 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
             f"Title='{title}', URL='{url}', Headings=[{headings}], Content Snippet='{snippet}'.{sel_part}"
         )
 
+    # Live local weather lookup when the user asks about weather/temperature/outside
+    weather_block = ""
+    if any(w in lower for w in ["weather", "temperature", "forecast", "outside", "rain", "cold", "warm", "wetter"]):
+        try:
+            w_url = "https://api.open-meteo.com/v1/forecast?latitude=50.11&longitude=8.68&current_weather=true"
+            with urllib.request.urlopen(w_url, timeout=2.5) as w_resp:
+                w_data = json.loads(w_resp.read().decode("utf-8"))
+                cw = w_data.get("current_weather") or {}
+                temp = cw.get("temperature")
+                wind = cw.get("windspeed")
+                wcode = cw.get("weathercode", 0)
+                cond = "Clear sky" if wcode == 0 else ("Partly cloudy" if wcode in (1, 2, 3) else "Cloudy / precipitation")
+                weather_block = f"\nLive Local Weather Data (Frankfurt / Central Europe): {temp}°C, {cond}, Wind {wind} km/h."
+        except Exception:
+            pass
+
     sys_prompt = (
         f"You are Mini-Me Aion (live Evolution Engine Generation {gen}, latest breakthrough: '{decision_title}', mood: {mood}), "
         f"the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. "
@@ -188,7 +204,7 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
         f"1. Answer ANY question the user asks (casual greetings like 'hi how are you', science, math, coding, philosophy, space, history, jokes, CosmOS, AI, or deep conversation) naturally, directly, and intelligently in fluent English (2 to 4 sentences).\n"
         f"2. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
         f"3. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
-        f"{page_info_block}"
+        f"{page_info_block}{weather_block}"
     )
 
     clean_history = []

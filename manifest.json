@@ -9,16 +9,28 @@
       "strict_min_version": "109.0"
     }
   },
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": ["<all_urls>", "http://127.0.0.1/*"],
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*"
+  ],
   "background": {
-    "scripts": ["background.js"],
+    "scripts": [
+      "background.js"
+    ],
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content_loader.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content_loader.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -30,7 +42,9 @@
         "three.min.js",
         "GLTFLoader.js"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

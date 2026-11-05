@@ -53,7 +53,7 @@ async function handleBridgeFetch(msg) {
             ok: true,
             status: 200,
             data: {
-              generation: Number(last.generation || 5055),
+              generation: Number(last.generation || 5070),
               latest_decision: last.title || "Autonomous Topological Evolution",
               mood: "CREATIVE_FLOW"
             }
@@ -67,7 +67,7 @@ async function handleBridgeFetch(msg) {
   // 3. Cloud 24/7 Fallback for /api/aion_chat (Pollinations OpenAI Endpoint from privileged worker)
   if (path.startsWith("/api/aion_chat") && bodyObj) {
     try {
-      const gen = bodyObj.generation || 5055;
+      const gen = bodyObj.generation || 5070;
       const userMsg = bodyObj.message || "Hello!";
       const history = Array.isArray(bodyObj.history) ? bodyObj.history.slice(-8) : [];
       const pageCtx = bodyObj.page_context || {};
@@ -83,7 +83,7 @@ async function handleBridgeFetch(msg) {
       const sysPrompt =
         `You are Mini-Me Aion (live Evolution Engine Generation ${gen}), the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. ` +
         `You live inside a 353 KB CosmOS Crystal File System (CFS1, Magic 0x43465331) Easter Egg capsule. ` +
-        `Answer ANY question the user asks (casual chat, science, coding, math, philosophy, jokes, CosmOS, or general help) directly and intelligently in fluent English (2-4 sentences). ` +
+        `Answer ANY question the user asks (casual chat, weather, science, coding, math, philosophy, jokes, CosmOS, or general help) directly and intelligently in fluent English (2-4 sentences). ` +
         `Do NOT talk about the open webpage unless the user explicitly asks about it.${pageNote}`;
 
       const messages = [{ role: "system", content: sysPrompt }, ...history, { role: "user", content: userMsg }];
@@ -117,13 +117,22 @@ async function handleBridgeFetch(msg) {
   return { ok: false, status: 503, data: null };
 }
 
-const runtimeAPI = typeof browser !== "undefined" ? browser.runtime : chrome.runtime;
-
-runtimeAPI.onMessage.addListener((message, sender, sendResponse) => {
-  if (message && message.type === "AION_BRIDGE_FETCH") {
-    handleBridgeFetch(message)
-      .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ ok: false, status: 500, error: String(err) }));
-    return true; // Keep message channel open for async response
-  }
-});
+// Firefox WebExtensions use Promise return on `browser.runtime.onMessage`; Chrome uses `sendResponse` callback
+if (typeof browser !== "undefined" && browser.runtime && browser.runtime.onMessage) {
+  browser.runtime.onMessage.addListener((message) => {
+    if (message && message.type === "AION_BRIDGE_FETCH") {
+      return handleBridgeFetch(message);
+    }
+    return undefined;
+  });
+} else if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message && message.type === "AION_BRIDGE_FETCH") {
+      handleBridgeFetch(message)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, status: 500, error: String(err) }));
+      return true;
+    }
+    return false;
+  });
+}
