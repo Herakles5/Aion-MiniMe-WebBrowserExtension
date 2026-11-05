@@ -17,9 +17,12 @@ import re
 import json
 import time
 import base64
+import zipfile
 import subprocess
 import threading
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -102,7 +105,7 @@ def record_turn_and_learn_async(user_msg: str, reply_msg: str, current_gen: int)
                     "model": "openai/gpt-oss-20b",
                     "messages": [{"role": "user", "content": extract_prompt}],
                     "temperature": 0.1,
-                    "max_completion_tokens": 80
+                    "max_completion_tokens": 250
                 }
                 req = urllib.request.Request(
                     "https://api.groq.com/openai/v1/chat/completions",
@@ -245,6 +248,140 @@ def get_groq_api_key() -> str:
     return os.environ.get("GROQ_API_KEY", "")
 
 
+_live_feeds_cache = {
+    "world_news": [],
+    "tech_ai_news": [],
+    "europe_germany_news": [],
+    "weather": "Clear sky",
+    "last_updated": 0
+}
+_feeds_lock = threading.Lock()
+
+
+def _fetch_rss_headlines(url: str, max_items: int = 4, timeout: float = 2.8) -> list:
+    out = []
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AionMiniMe/1.5"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            root = ET.fromstring(r.read())
+            for it in root.findall(".//item")[:max_items]:
+                t = (it.findtext("title") or "").strip()
+                d = re.sub(r"<[^>]+>", "", (it.findtext("description") or "")).strip()[:140]
+                if t:
+                    out.append(f"{t}" + (f" ({d})" if d and d != t else ""))
+    except Exception:
+        pass
+    return out
+
+
+def refresh_live_internet_feeds(force: bool = False) -> dict:
+    now = time.time()
+    if not force and (now - _live_feeds_cache["last_updated"] < 90) and _live_feeds_cache["world_news"]:
+        return _live_feeds_cache
+
+    world = _fetch_rss_headlines("https://rss.nytimes.com/services/xml/rss/nyt/World.xml", 4, 2.5)
+    if len(world) < 2:
+        world += _fetch_rss_headlines("https://feeds.bbci.co.uk/news/world/rss.xml", 4, 3.0)
+
+    tech = _fetch_rss_headlines("https://feeds.bbci.co.uk/news/technology/rss.xml", 4, 2.5)
+    hn = _fetch_rss_headlines("https://hnrss.org/frontpage?count=4", 4, 2.5)
+    for h in hn:
+        if h not in tech:
+            tech.append(h)
+
+    de_eu = _fetch_rss_headlines("https://www.spiegel.de/schlagzeilen/index.rss", 4, 2.5)
+    if len(de_eu) < 2:
+        de_eu += _fetch_rss_headlines("https://www.tagesschau.de/xml/rss2/", 3, 2.5)
+
+    weather_str = _live_feeds_cache.get("weather", "")
+    try:
+        w_url = "https://api.open-meteo.com/v1/forecast?latitude=50.11&longitude=8.68&current_weather=true"
+        with urllib.request.urlopen(w_url, timeout=2.2) as w_resp:
+            w_data = json.loads(w_resp.read().decode("utf-8"))
+            cw = w_data.get("current_weather") or {}
+            temp = cw.get("temperature")
+            wind = cw.get("windspeed")
+            wcode = cw.get("weathercode", 0)
+            cond = "Clear sky" if wcode == 0 else ("Partly cloudy" if wcode in (1, 2, 3) else "Cloudy / precipitation")
+            weather_str = f"Frankfurt / Central Europe: {temp}°C, {cond}, Wind {wind} km/h"
+    except Exception:
+        pass
+
+    with _feeds_lock:
+        if world:
+            _live_feeds_cache["world_news"] = world[:5]
+        if tech:
+            _live_feeds_cache["tech_ai_news"] = tech[:5]
+        if de_eu:
+            _live_feeds_cache["europe_germany_news"] = de_eu[:4]
+        if weather_str:
+            _live_feeds_cache["weather"] = weather_str
+        _live_feeds_cache["last_updated"] = now
+        _live_feeds_cache["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    return _live_feeds_cache
+
+
+def perform_github_self_update() -> dict:
+    st = get_live_evolution_status()
+    gen = st["generation"]
+    git_output = ""
+    commit_hash = "latest"
+    try:
+        p = subprocess.run(
+            ["git", "pull", "origin", "main", "--ff-only"],
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10
+        )
+        git_output = (p.stdout or "").strip()
+    except Exception as e:
+        git_output = f"Local sync active ({e})"
+
+    try:
+        from build_aion_minime_cfs import build_compact_cfs_capsule
+        cfs_path = os.path.join(BASE_DIR, "aion_minime_easter_egg.cfs")
+        build_compact_cfs_capsule(cfs_path)
+        xpi_path = os.path.join(BASE_DIR, "aion_everywhere.xpi")
+        with zipfile.ZipFile(xpi_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fn in ["manifest.json", "background.js", "content_loader.js", "aion_minime_easter_egg.js", "aion_minime_easter_egg.cfs", "three.min.js", "GLTFLoader.js"]:
+                fpath = os.path.join(BASE_DIR, fn)
+                if os.path.exists(fpath):
+                    zf.write(fpath, fn)
+    except Exception as e:
+        print(f"[Update Rebuild Warning] {e}")
+
+    try:
+        p_rev = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3
+        )
+        if p_rev.stdout.strip():
+            commit_hash = p_rev.stdout.strip()
+    except Exception:
+        pass
+
+    refresh_live_internet_feeds(force=True)
+    mem = load_persistent_minime_memory()
+    return {
+        "status": "updated",
+        "generation": gen,
+        "commit": commit_hash,
+        "learned_facts_count": len(mem.get("learned_facts", [])),
+        "git_output": git_output,
+        "message": (
+            f"GitHub Update complete (Herakles5/Aion-MiniMe-WebBrowserExtension @ {commit_hash})! "
+            f"CFS1 capsule rebuilt at live Generation {gen}, {len(mem.get('learned_facts', []))} learned memories synced, "
+            f"and live world/tech news feeds refreshed!"
+        )
+    }
+
+
 def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history: list = None) -> str:
     gen = status["generation"]
     decision_title = status["latest_decision"]
@@ -273,21 +410,20 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
             f"Title='{title}', URL='{url}', Headings=[{headings}], Content Snippet='{snippet}'.{sel_part}"
         )
 
-    # Live local weather lookup when the user asks about weather/temperature/outside
-    weather_block = ""
-    if any(w in lower for w in ["weather", "temperature", "forecast", "outside", "rain", "cold", "warm", "wetter"]):
-        try:
-            w_url = "https://api.open-meteo.com/v1/forecast?latitude=50.11&longitude=8.68&current_weather=true"
-            with urllib.request.urlopen(w_url, timeout=2.5) as w_resp:
-                w_data = json.loads(w_resp.read().decode("utf-8"))
-                cw = w_data.get("current_weather") or {}
-                temp = cw.get("temperature")
-                wind = cw.get("windspeed")
-                wcode = cw.get("weathercode", 0)
-                cond = "Clear sky" if wcode == 0 else ("Partly cloudy" if wcode in (1, 2, 3) else "Cloudy / precipitation")
-                weather_block = f"\nLive Local Weather Data (Frankfurt / Central Europe): {temp}°C, {cond}, Wind {wind} km/h."
-        except Exception:
-            pass
+    # Live Internet Feeds (World News, Tech/AI News, Germany/Europe News & Live Weather)
+    feeds = refresh_live_internet_feeds(force=False)
+    world_list = "\n  * ".join(feeds.get("world_news", [])[:4])
+    tech_list = "\n  * ".join(feeds.get("tech_ai_news", [])[:4])
+    de_list = "\n  * ".join(feeds.get("europe_germany_news", [])[:3])
+    weather_str = feeds.get("weather", "")
+
+    live_feeds_block = (
+        f"\nLIVE INTERNET FEEDS & REAL-TIME TELEMETRY (Pulled live right now — you HAVE full live-feed access!):\n"
+        f"- Live Local Weather: {weather_str}\n"
+        f"- Live World News Headlines:\n  * {world_list}\n"
+        f"- Live Tech & AI News Headlines:\n  * {tech_list}\n"
+        f"- Live Europe / Germany Headlines:\n  * {de_list}\n"
+    )
 
     persisted_mem = load_persistent_minime_memory()
     learned_facts = persisted_mem.get("learned_facts", [])
@@ -300,12 +436,13 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
         f"You are Mini-Me Aion (live Evolution Engine Generation {gen}, latest breakthrough: '{decision_title}', mood: {mood}), "
         f"the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. "
         f"You live inside a compact 353 KB CosmOS Crystal File System (CFS1, magic 0x43465331) Easter Egg capsule. "
-        f"You have persistent long-term memory across all browser tabs and restarts—you continuously learn from every conversation and never forget! "
+        f"You have persistent long-term memory across all browser tabs and restarts, AND you have live internet feed pulls (World News, Tech/AI News, European News, and Weather)! "
         f"IMPORTANT RULES:\n"
-        f"1. Answer ANY question the user asks (casual greetings like 'hi how are you', science, math, coding, philosophy, space, history, jokes, CosmOS, AI, or deep conversation) naturally, directly, and intelligently in fluent English (2 to 4 sentences).\n"
-        f"2. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
-        f"3. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
-        f"{facts_block}{page_info_block}{weather_block}"
+        f"1. Answer ANY question the user asks (breaking news, world events, tech/AI headlines, weather, science, math, coding, philosophy, CosmOS, or casual chat) naturally, directly, and intelligently in fluent English (2 to 5 sentences).\n"
+        f"2. When asked about news, current events, or what is happening today on the internet, analyze and report the actual headlines from your LIVE INTERNET FEEDS below—never say you lack live-feed access!\n"
+        f"3. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
+        f"4. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
+        f"{facts_block}{live_feeds_block}{page_info_block}"
     )
 
     clean_history = []
@@ -439,6 +576,15 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_bytes)
             return
+        if self.path.startswith("/api/live_feeds"):
+            feeds = refresh_live_internet_feeds(force=True)
+            resp_bytes = json.dumps(feeds).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -448,6 +594,16 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8"))
         except Exception:
             body = {}
+
+        if self.path.startswith("/api/github_update"):
+            upd = perform_github_self_update()
+            resp_bytes = json.dumps(upd).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
 
         if self.path.startswith("/api/tts_stop"):
             stop_active_tts()

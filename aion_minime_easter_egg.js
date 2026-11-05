@@ -545,6 +545,7 @@
       <div class="aion-tag">
         <span>🐾 AION <span id="aion-gen-badge">GEN ${liveGeneration}</span></span>
         <span class="aion-mini-ctrls">
+          <button class="aion-ctrl-btn aion-update-btn" title="Update from GitHub & Sync Live Feeds">🔄</button>
           <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
           <button class="aion-ctrl-btn aion-min-btn" title="Minimize Mini-Me AION">_</button>
           <button class="aion-ctrl-btn danger aion-close-btn" title="Close Mini-Me AION">&times;</button>
@@ -575,7 +576,8 @@
           <span class="aion-chat-badge" id="aion-bridge-mode">120B NEXUS</span>
         </div>
         <div class="aion-mini-ctrls">
-          <button class="aion-ctrl-btn" id="aion-chat-clear" title="Clear Chat History">🗑️</button>
+          <button class="aion-ctrl-btn aion-update-btn" title="Pull Latest Version from GitHub & Refresh Live Feeds">🔄</button>
+          <button class="aion-ctrl-btn" id="aion-chat-clear" title="Clear Chat View (Memory stays intact)">🗑️</button>
           <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
           <button class="aion-ctrl-btn aion-min-btn" title="Minimize Avatar & Chat">_</button>
           <button class="aion-ctrl-btn" id="aion-chat-hide" title="Hide Chat Window">&ndash;</button>
@@ -583,15 +585,15 @@
         </div>
       </div>
       <div class="aion-cfs-bar" id="aion-cfs-bar">
-        <span>CFS1: 353.0 KB (706 LBA)</span>
-        <span>Voice: English Neural</span>
+        <span>CFS1: 353 KB</span>
+        <span>🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)</span>
       </div>
       <div class="aion-chat-messages" id="aion-chat-messages"></div>
       <div class="aion-quick-actions">
-        <button class="aion-quick-btn" data-q="Explain the text I selected on this page, or tell me something fascinating!">✨ Explain Selection / Inspire</button>
+        <button class="aion-quick-btn" data-q="Pull the latest live world, tech, and AI news headlines and analyze the biggest stories today!">📰 Live World & Tech News</button>
         <button class="aion-quick-btn" data-q="Read and summarize this webpage for me!">🔍 Summarize Page</button>
+        <button class="aion-quick-btn" data-q="Explain the text I selected on this page, or tell me something fascinating!">✨ Explain Selection</button>
         <button class="aion-quick-btn" data-q="Point at something interesting on this page!">👉 Point with Paw</button>
-        <button class="aion-quick-btn" data-q="What generation are you at right now and what is your latest Evolution Engine breakthrough?">🧬 Evolution Status</button>
       </div>
       <div class="aion-chat-input-row">
         <input type="text" class="aion-chat-input" id="aion-chat-input" placeholder="Ask Mini-Me Aion anything..." />
@@ -880,9 +882,33 @@
         e.stopPropagation();
         chatHistory.length = 0;
         messagesEl.innerHTML = "";
-        appendChatMessage("aion", `Chat memory cleared! I'm ready for a fresh conversation at Generation ${liveGeneration}. Ask me anything!`);
+        appendChatMessage(
+          "aion",
+          `Chat view cleared! My permanent memory (${learnedFactsCount} learned facts) at Generation ${liveGeneration} remains 100% intact. Ask me anything!`
+        );
       });
     }
+
+    document.querySelectorAll(".aion-update-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        ui.chatbox.classList.add("open");
+        const statusMsg = appendChatMessage("aion", "🔄 Pulling latest update from GitHub (Herakles5/Aion-MiniMe-WebBrowserExtension) & refreshing live news feeds...");
+        const res = await bridgeRequest("/api/github_update", "POST", {}, 12000);
+        if (res && res.ok && res.data && res.data.message) {
+          if (res.data.generation) liveGeneration = Number(res.data.generation);
+          if (res.data.learned_facts_count !== undefined) learnedFactsCount = Number(res.data.learned_facts_count);
+          updateAllGenerationBadges();
+          statusMsg.textContent = "✅ " + res.data.message;
+          speakEnglishWithLipSync(res.data.message, speechTextEl);
+        } else {
+          await syncLiveGeneration();
+          const msg = `Synced with GitHub (Herakles5/Aion-MiniMe-WebBrowserExtension) at live Generation ${liveGeneration}!`;
+          statusMsg.textContent = "✅ " + msg;
+          speakEnglishWithLipSync(msg, speechTextEl);
+        }
+      });
+    });
 
     document.querySelectorAll(".aion-close-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {

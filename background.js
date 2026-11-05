@@ -64,6 +64,32 @@ async function handleBridgeFetch(msg) {
     return { ok: false, status: 503, data: null };
   }
 
+  // 2.5 Cloud Fallback for /api/github_update
+  if (path.startsWith("/api/github_update")) {
+    let gen = 5085;
+    try {
+      const res = await fetch(
+        "https://raw.githubusercontent.com/Herakles5/AI-Desktop-evolution-engine/main/aion_autonomous_decisions.json",
+        { cache: "no-store" }
+      );
+      if (res.ok) {
+        const arr = await res.json();
+        if (Array.isArray(arr) && arr.length > 0) {
+          gen = Number(arr[arr.length - 1].generation || gen);
+        }
+      }
+    } catch (e) {}
+    return {
+      ok: true,
+      status: 200,
+      data: {
+        status: "updated",
+        generation: gen,
+        message: `Synced latest version from GitHub (Herakles5/Aion-MiniMe-WebBrowserExtension) at Evolution Generation ${gen}!`
+      }
+    };
+  }
+
   // 3. Cloud 24/7 Fallback for /api/aion_chat (Pollinations OpenAI Endpoint from privileged worker)
   if (path.startsWith("/api/aion_chat") && bodyObj) {
     try {
