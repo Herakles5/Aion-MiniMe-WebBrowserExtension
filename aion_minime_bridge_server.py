@@ -37,13 +37,19 @@ _audio_lock = threading.Lock()
 
 
 def get_live_evolution_status() -> dict:
-    gen = 5033
+    gen = 5054
     decision_title = "Autonomous Topological Evolution"
     mood = "CREATIVE_FLOW"
     try:
         with open(os.path.join(AI_DESKTOP_DIR, "ai_memory.json"), "r", encoding="utf-8") as f:
-            mem = json.load(f)
-            gen = int(mem.get("generation", gen))
+            head_chunk = f.read(1024)
+            m = re.search(r'"generation"\s*:\s*(\d+)', head_chunk)
+            if m:
+                gen = int(m.group(1))
+            else:
+                f.seek(0)
+                mem = json.load(f)
+                gen = int(mem.get("generation", gen))
     except Exception:
         pass
     try:
