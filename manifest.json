@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "AION Everywhere — Mini-Me CFS1 Easter Egg Companion",
+  "version": "1.0.0",
+  "description": "Peaceful 3D Mini-Me AION (Model 13 Tuxedo Cat) packed in a 353 KB CosmOS Crystal File System (CFS1) capsule. Roams every webpage, points at DOM elements with her paw, and chats in English 24/7!",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aion-everywhere@cosmos.ai",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_loader.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "aion_minime_easter_egg.cfs",
+        "aion_minime_easter_egg.js",
+        "three.min.js",
+        "GLTFLoader.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+

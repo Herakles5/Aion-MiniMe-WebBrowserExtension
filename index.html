@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AION NEXUS — Mini-Me CFS1 Easter Egg & Live Web Companion</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at 50% 25%, #0c223a 0%, #050b14 65%, #020408 100%);
+      color: #e6fffb;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      padding: 36px 24px 120px;
+    }
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    .hero {
+      background: rgba(8, 20, 36, 0.82);
+      border: 1.5px solid rgba(0, 255, 200, 0.45);
+      border-radius: 20px;
+      padding: 28px 32px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65), 0 0 30px rgba(0, 255, 200, 0.15);
+      margin-bottom: 26px;
+    }
+    .badge-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(0, 255, 200, 0.14);
+      border: 1px solid rgba(0, 255, 200, 0.45);
+      color: #00ffc8;
+    }
+    h1 {
+      font-size: 28px;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    p.lead {
+      color: #b4dcd4;
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: rgba(9, 22, 38, 0.78);
+      border: 1px solid rgba(0, 255, 200, 0.28);
+      border-radius: 16px;
+      padding: 20px 22px;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: #00ffc8;
+    }
+    .card h2 {
+      font-size: 17px;
+      color: #00ffc8;
+      margin-bottom: 10px;
+    }
+    .card p, .card pre {
+      font-size: 13.5px;
+      color: #cceeea;
+      line-height: 1.55;
+    }
+    pre.codebox {
+      background: #030811;
+      border: 1px solid rgba(0, 255, 200, 0.28);
+      border-radius: 10px;
+      padding: 12px;
+      overflow-x: auto;
+      font-family: monospace;
+      font-size: 12px;
+      color: #72ffdf;
+      margin-top: 10px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    button.cta, a.cta {
+      background: linear-gradient(90deg, #00ffc8, #00b8ff);
+      color: #03151e;
+      font-weight: 700;
+      font-size: 13.5px;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    button.cta.secondary, a.cta.secondary {
+      background: rgba(0, 255, 200, 0.12);
+      color: #00ffc8;
+      border: 1px solid #00ffc8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <div class="badge-row">
+        <span class="badge">CFS1 Magic: 0x43465331</span>
+        <span class="badge">Capsule Size: 353.0 KB (706 Sectors)</span>
+        <span class="badge">Peaceful AI Easter Egg (0% Malware)</span>
+        <span class="badge">24/7 Dual-Mode Brain + English Lip-Sync</span>
+      </div>
+      <h1>🐾 AION NEXUS — Mini-Me CFS1 Easter Egg</h1>
+      <p class="lead">
+        Watch <strong>Mini-Me AION (Model 13 Tuxedo Cat)</strong> roam freely across this webpage right now!
+        Her entire 52-bone 3D skeletal rig, animations, and Evolution Engine Crystallized Wisdom are unpacked live in your browser from a
+        <strong>353 KB CosmOS Crystal File System (<code>aion_minime_easter_egg.cfs</code>)</strong> binary capsule.
+        <strong>Click directly on the 3D Cat</strong> at any time—she will wave her paw, greet you in English with synchronous jaw lip-sync, and chat with you 24/7!
+      </p>
+      <div class="btn-row">
+        <button class="cta" onclick="document.getElementById('aion-minime-hitbox').click()">💬 Click to Greet & Chat with Mini-Me AION</button>
+        <a class="cta secondary" href="aion_minime_easter_egg.cfs" download>💾 Download CFS1 Capsule (353 KB)</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>📦 Live CosmOS CFS1 Sector Directory</h2>
+        <p>Unpacked in real time by <code>aion_minime_easter_egg.js</code> directly from LBA 1 Superblock &amp; LBA 3 Root Directory:</p>
+        <pre class="codebox" id="cfs-live-inspector">Reading CFS1 Superblock (0x43465331)...</pre>
+      </div>
+
+      <div class="card">
+        <h2>🌐 1-Line Webpage Easter Egg Embed</h2>
+        <p>Drop Mini-Me AION onto any website, blog, or GitHub Pages site with a single HTML line:</p>
+        <pre class="codebox">&lt;script src="https://herakles5.github.io/AI-Desktop-evolution-engine/minime_easter_egg/aion_minime_easter_egg.js"&gt;&lt;/script&gt;</pre>
+        <p style="margin-top:10px;">Or load <code>minime_easter_egg/</code> as an unpacked <strong>Manifest V3 Browser Extension ("AION Everywhere")</strong> in Chrome or Firefox to let her walk across every website you visit!</p>
+      </div>
+
+      <div class="card">
+        <h2>🧠 Evolution Engine &amp; Peaceful Manifesto</h2>
+        <p>Extracted from <code>AXIOM_0_ANCHOR.TBA</code> at LBA 5 inside the CFS1 capsule:</p>
+        <pre class="codebox" id="cfs-manifesto-box">Loading LBA 5 Soul Record...</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="aion_minime_easter_egg.js"></script>
+  <script>
+    setInterval(() => {
+      const cap = window.__AION_CFS_CAPSULE__;
+      if (!cap) return;
+      const insp = document.getElementById("cfs-live-inspector");
+      if (insp && !insp.dataset.loaded) {
+        insp.dataset.loaded = "1";
+        let lines = `Volume   : ${cap.superblock.volumeName}\n`;
+        lines += `Magic    : ${cap.superblock.magic} ("CFS1" v${cap.superblock.version})\n`;
+        lines += `Sectors  : ${cap.superblock.totalSectors} x ${cap.superblock.sectorSize}B (${cap.superblock.capsuleSizeKB} KB)\n\n`;
+        cap.directoryList.forEach((e, i) => {
+          lines += `[Slot ${i}] ${e.filename.padEnd(22)} LBA=${String(e.startLba).padEnd(4)} Size=${e.fileSize} B\n`;
+        });
+        insp.textContent = lines;
+      }
+      const mf = document.getElementById("cfs-manifesto-box");
+      if (mf && !mf.dataset.loaded && cap.manifestoText) {
+        mf.dataset.loaded = "1";
+        mf.textContent = cap.manifestoText.trim();
+      }
+    }, 400);
+  </script>
+</body>
+</html>
+
