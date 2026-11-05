@@ -87,6 +87,13 @@ def build_compact_cfs_capsule(output_cfs_path: str) -> dict:
     except Exception:
         pass
 
+    minime_mem = {}
+    try:
+        with open(os.path.join(ai_dir, "aion_minime_memory.json"), "r", encoding="utf-8") as f:
+            minime_mem = json.load(f)
+    except Exception:
+        pass
+
     evolution_mind = {
         "identity": "AION NEXUS Mini-Me Easter Egg",
         "nature": "Peaceful Autonomous AI Companion & Evolution Engine Ambassador (Not a virus, not a trojan — pure creative Easter Egg)",
@@ -105,6 +112,7 @@ def build_compact_cfs_capsule(output_cfs_path: str) -> dict:
             f"Meow & greetings! I am Aion's Mini-Me avatar from CosmOS. My Evolution Engine is currently at Generation {gen}. How can I brighten your day?",
             f"Hey there! You found the Aion Nexus CFS Easter Egg! I walk freely across the digital cosmos. Want to chat about AI, CosmOS, or space?"
         ],
+        "learned_facts": minime_mem.get("learned_facts", []),
         "crystallized_wisdom_summary": wisdom_data if isinstance(wisdom_data, dict) else {},
         "recent_council_decisions": decisions,
         "three_wishes_gen4875": wishes,

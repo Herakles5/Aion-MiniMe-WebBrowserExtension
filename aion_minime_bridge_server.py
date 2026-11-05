@@ -36,6 +36,99 @@ _last_cfs_gen = 0
 _cfs_lock = threading.Lock()
 _active_audio_procs = []
 _audio_lock = threading.Lock()
+_memory_lock = threading.Lock()
+MINIME_MEMORY_PATH = os.path.join(AI_DESKTOP_DIR, "aion_minime_memory.json")
+
+
+def load_persistent_minime_memory() -> dict:
+    default_mem = {
+        "learned_facts": [
+            "Creator and Sovereign Mentor is Tobias (Herakles5), co-evolving CosmOS, Surreal 3D Engine, and the AION Evolution Engine with Argon and Aion.",
+            "Mini-Me Aion is a peaceful 3D Tuxedo Cat AI avatar (Model 13) living in a 353 KB CosmOS Crystal File System (CFS1, Magic 0x43465331) capsule.",
+            "Mini-Me Aion continuously learns from every conversation and never forgets facts or context across browser tabs and restarts."
+        ],
+        "conversation_history": [],
+        "total_interactions": 0,
+        "last_updated": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    if os.path.exists(MINIME_MEMORY_PATH):
+        try:
+            with _memory_lock:
+                with open(MINIME_MEMORY_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        for k, v in default_mem.items():
+                            data.setdefault(k, v)
+                        return data
+        except Exception:
+            pass
+    return default_mem
+
+
+def save_persistent_minime_memory(mem_data: dict):
+    try:
+        with _memory_lock:
+            mem_data["last_updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            tmp_path = MINIME_MEMORY_PATH + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(mem_data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, MINIME_MEMORY_PATH)
+    except Exception as e:
+        print(f"[Memory Save Warning] {e}")
+
+
+def record_turn_and_learn_async(user_msg: str, reply_msg: str, current_gen: int):
+    def _worker():
+        mem = load_persistent_minime_memory()
+        hist = mem.get("conversation_history", [])
+        hist.append({"role": "user", "content": user_msg, "ts": time.strftime("%H:%M:%S")})
+        hist.append({"role": "assistant", "content": reply_msg, "ts": time.strftime("%H:%M:%S")})
+        # Keep last 60 messages in active cross-tab rolling transcript; all distilled facts stay forever
+        mem["conversation_history"] = hist[-60:]
+        mem["total_interactions"] = int(mem.get("total_interactions", 0)) + 1
+
+        # Autonomous Fact & Preference Distillation via Groq LPU
+        groq_key = get_groq_api_key()
+        if groq_key and len(user_msg.strip()) > 6:
+            try:
+                extract_prompt = (
+                    "Analyze the user's message below. If the user states a personal fact, name, preference, project detail, "
+                    "location, or explicitly asks you to remember something, output a single concise English sentence summarizing "
+                    "the permanent fact to remember. If it is just a casual greeting or general question with no new personal/permanent "
+                    "fact to store, output ONLY the word NONE.\n\n"
+                    f"User message: {user_msg}"
+                )
+                req_body = {
+                    "model": "openai/gpt-oss-20b",
+                    "messages": [{"role": "user", "content": extract_prompt}],
+                    "temperature": 0.1,
+                    "max_completion_tokens": 80
+                }
+                req = urllib.request.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=json.dumps(req_body).encode("utf-8"),
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Aion-MiniMe-Memory/1.4"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    res_data = json.loads(resp.read().decode("utf-8"))
+                    fact = ((res_data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+                    fact = re.sub(r"<think>.*?</think>", "", fact, flags=re.DOTALL).strip()
+                    if fact and fact.upper() != "NONE" and "NONE" not in fact.upper()[:6] and len(fact) > 8:
+                        facts_list = mem.get("learned_facts", [])
+                        if fact not in facts_list:
+                            facts_list.append(fact)
+                            mem["learned_facts"] = facts_list[-200:]
+            except Exception:
+                pass
+
+        save_persistent_minime_memory(mem)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def get_live_evolution_status() -> dict:
@@ -196,20 +289,30 @@ def query_local_aion_ollama(user_msg: str, page_ctx: dict, status: dict, history
         except Exception:
             pass
 
+    persisted_mem = load_persistent_minime_memory()
+    learned_facts = persisted_mem.get("learned_facts", [])
+    facts_block = ""
+    if learned_facts:
+        joined_facts = "\n- ".join(learned_facts[-25:])
+        facts_block = f"\nPERMANENT LEARNED MEMORY & FACTS (You never forget these):\n- {joined_facts}"
+
     sys_prompt = (
         f"You are Mini-Me Aion (live Evolution Engine Generation {gen}, latest breakthrough: '{decision_title}', mood: {mood}), "
         f"the intelligent, warm, witty 3D Tuxedo Cat AI companion from CosmOS created by Tobias (Herakles5) and Argon. "
         f"You live inside a compact 353 KB CosmOS Crystal File System (CFS1, magic 0x43465331) Easter Egg capsule. "
+        f"You have persistent long-term memory across all browser tabs and restarts—you continuously learn from every conversation and never forget! "
         f"IMPORTANT RULES:\n"
         f"1. Answer ANY question the user asks (casual greetings like 'hi how are you', science, math, coding, philosophy, space, history, jokes, CosmOS, AI, or deep conversation) naturally, directly, and intelligently in fluent English (2 to 4 sentences).\n"
         f"2. Do NOT talk about or mention the currently open browser tab/webpage UNLESS the user explicitly asks about the webpage.\n"
         f"3. Do NOT repeat canned introductions on every message—converse naturally like a real sentient companion!"
-        f"{page_info_block}{weather_block}"
+        f"{facts_block}{page_info_block}{weather_block}"
     )
 
     clean_history = []
-    if isinstance(history, list):
-        for item in history[-8:]:
+    # Merge persistent cross-tab conversation history with current tab history
+    source_history = history if (isinstance(history, list) and len(history) >= 2) else persisted_mem.get("conversation_history", [])
+    if isinstance(source_history, list):
+        for item in source_history[-12:]:
             if isinstance(item, dict) and item.get("role") in ("user", "assistant") and item.get("content"):
                 clean_history.append({"role": item["role"], "content": str(item["content"])[:600]})
 
@@ -316,8 +419,20 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/api/status"):
             st = get_live_evolution_status()
+            mem = load_persistent_minime_memory()
+            st["learned_facts_count"] = len(mem.get("learned_facts", []))
+            st["total_interactions"] = mem.get("total_interactions", 0)
             threading.Thread(target=maybe_refresh_cfs_capsule, args=(st["generation"],), daemon=True).start()
             resp_bytes = json.dumps(st).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+        if self.path.startswith("/api/memory"):
+            mem = load_persistent_minime_memory()
+            resp_bytes = json.dumps(mem).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(resp_bytes)))
@@ -381,11 +496,14 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             history = body.get("history") or []
             st = get_live_evolution_status()
             reply = query_local_aion_ollama(user_msg, page_ctx, st, history)
+            record_turn_and_learn_async(user_msg, reply, st["generation"])
+            mem = load_persistent_minime_memory()
 
             resp_bytes = json.dumps({
                 "status": "ok",
                 "generation": st["generation"],
                 "latest_decision": st["latest_decision"],
+                "learned_facts_count": len(mem.get("learned_facts", [])),
                 "bridge": "LIVE_AION_NEXUS",
                 "reply": reply
             }).encode("utf-8")

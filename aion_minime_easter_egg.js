@@ -23,8 +23,9 @@
   const CFS_MAGIC = 0x43465331; // "CFS1"
   const DEFAULT_BRIDGE_URL = window.AION_NEXUS_BRIDGE_URL || "http://127.0.0.1:8788";
 
-  let liveGeneration = 5055;
+  let liveGeneration = 5077;
   let liveDecisionTitle = "Autonomous Topological Evolution";
+  let learnedFactsCount = 3;
   let soundEnabled = true;
   let isMinimized = false;
   let isClosed = false;
@@ -249,6 +250,10 @@
     if (sp && sp.dataset.isDefaultGreeting === "1") {
       sp.textContent = `Hi! I'm Mini-Me Aion (Gen ${liveGeneration}). Click me to chat in English!`;
     }
+    const cfsBar = document.getElementById("aion-cfs-bar");
+    if (cfsBar) {
+      cfsBar.innerHTML = `<span>CFS1: 353 KB</span><span>🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)</span>`;
+    }
   }
 
   async function syncLiveGeneration() {
@@ -256,6 +261,9 @@
     if (res && res.ok && res.data && res.data.generation) {
       liveGeneration = Number(res.data.generation);
       if (res.data.latest_decision) liveDecisionTitle = res.data.latest_decision;
+      if (res.data.learned_facts_count !== undefined) {
+        learnedFactsCount = Number(res.data.learned_facts_count);
+      }
       updateAllGenerationBadges();
     }
   }
@@ -765,8 +773,11 @@
     if (res && res.ok && res.data && res.data.reply) {
       if (res.data.generation) {
         liveGeneration = Number(res.data.generation);
-        updateAllGenerationBadges();
       }
+      if (res.data.learned_facts_count !== undefined) {
+        learnedFactsCount = Number(res.data.learned_facts_count);
+      }
+      updateAllGenerationBadges();
       const badge = document.getElementById("aion-bridge-mode");
       if (badge) {
         badge.textContent = res.data.bridge === "24/7 CLOUD + CFS1" ? "24/7 CLOUD" : "120B NEXUS";
@@ -907,6 +918,28 @@
 
     await syncLiveGeneration();
     setInterval(syncLiveGeneration, 4000);
+
+    // Restore persistent cross-tab conversation history & learned facts from AION Memory Engine
+    try {
+      const memRes = await bridgeRequest("/api/memory?t=" + Date.now(), "GET", null, 3500);
+      if (memRes && memRes.ok && memRes.data) {
+        if (Array.isArray(memRes.data.learned_facts)) {
+          learnedFactsCount = memRes.data.learned_facts.length;
+          updateAllGenerationBadges();
+        }
+        if (Array.isArray(memRes.data.conversation_history) && memRes.data.conversation_history.length > 0) {
+          const recentTurns = memRes.data.conversation_history.slice(-10);
+          chatHistory.length = 0;
+          messagesEl.innerHTML = "";
+          recentTurns.forEach((turn) => {
+            if (turn && turn.role && turn.content) {
+              chatHistory.push({ role: turn.role, content: turn.content });
+              appendChatMessage(turn.role === "user" ? "user" : "aion", turn.content);
+            }
+          });
+        }
+      }
+    } catch (e) {}
 
     // 2. Load Three.js + GLTFLoader and parse MODEL_13_CAT.GLB.Z from CFS1 memory
     await ensureThreeJS();
