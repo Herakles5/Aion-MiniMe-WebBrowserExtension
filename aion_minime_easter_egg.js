@@ -26,6 +26,40 @@
   let liveGeneration = 5077;
   let liveDecisionTitle = "Autonomous Topological Evolution";
   let learnedFactsCount = 3;
+  let learnedChoreoLibrary = [];
+  let choreoCycleIndex = 0;
+  const BUILTIN_CHOREOGRAPHIES = [
+    {
+      name: "MEOVV 'Go Hard' K-Pop Stage Choreo",
+      bpm: 132,
+      hipSway: 1.25,
+      spineWave: 1.30,
+      armWave: 1.45,
+      legBounce: 1.35,
+      spinRate: 1.2,
+      source: "AION 52-Bone Choreography Engine"
+    },
+    {
+      name: "CosmOS Cyber Breakdance & 360 Spin",
+      bpm: 140,
+      hipSway: 1.30,
+      spineWave: 1.35,
+      armWave: 1.50,
+      legBounce: 1.45,
+      spinRate: 1.6,
+      source: "AION 52-Bone Choreography Engine"
+    },
+    {
+      name: "Street Hip-Hop Bounce & Wave",
+      bpm: 116,
+      hipSway: 1.35,
+      spineWave: 1.25,
+      armWave: 1.20,
+      legBounce: 1.30,
+      spinRate: 0.8,
+      source: "AION 52-Bone Choreography Engine"
+    }
+  ];
   let soundEnabled = true;
   let isMinimized = false;
   let isClosed = false;
@@ -255,7 +289,8 @@
       const s1 = document.createElement("span");
       s1.textContent = "CFS1: 353 KB";
       const s2 = document.createElement("span");
-      s2.textContent = `🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)`;
+      const totalDances = BUILTIN_CHOREOGRAPHIES.length + learnedChoreoLibrary.length;
+      s2.textContent = `🧠 Memory: ${learnedFactsCount} Facts • 💃 ${totalDances} Dances`;
       cfsBar.replaceChildren(s1, s2);
     }
   }
@@ -267,6 +302,9 @@
       if (res.data.latest_decision) liveDecisionTitle = res.data.latest_decision;
       if (res.data.learned_facts_count !== undefined) {
         learnedFactsCount = Number(res.data.learned_facts_count);
+      }
+      if (Array.isArray(res.data.learned_choreographies)) {
+        learnedChoreoLibrary = res.data.learned_choreographies;
       }
       updateAllGenerationBadges();
     }
@@ -1134,6 +1172,9 @@
               else if (n.indexOf("cat_bip-Tail_") !== -1) bones.tail0 = obj;
               else if (n.indexOf("cat_bip-Tail1") !== -1) bones.tail1 = obj;
               else if (n.indexOf("cat_bip-Tail2") !== -1) bones.tail2 = obj;
+              if (obj.quaternion) {
+                obj.userData.bindQuat = obj.quaternion.clone();
+              }
             });
 
             catGroup.add(model);
@@ -1261,50 +1302,48 @@
         };
         learnedFromVideo = true;
 
+        // Add cumulatively to local repertoire without overwriting previous choreographies
+        const existIdx = learnedChoreoLibrary.findIndex((c) => c.name === activeChoreo.name);
+        if (existIdx >= 0) {
+          learnedChoreoLibrary[existIdx] = activeChoreo;
+        } else {
+          learnedChoreoLibrary.push(activeChoreo);
+        }
+        updateAllGenerationBadges();
+
         // Save learned choreography permanently to AION Soul Memory!
         bridgeRequest("/api/learn_choreo", "POST", { choreo: activeChoreo }, 5000)
           .then((res) => {
-            if (res && res.ok && res.data && res.data.learned_facts_count !== undefined) {
-              learnedFactsCount = Number(res.data.learned_facts_count);
+            if (res && res.ok && res.data) {
+              if (res.data.learned_facts_count !== undefined) {
+                learnedFactsCount = Number(res.data.learned_facts_count);
+              }
+              if (Array.isArray(res.data.learned_choreographies)) {
+                learnedChoreoLibrary = res.data.learned_choreographies;
+              }
               updateAllGenerationBadges();
             }
           })
           .catch(() => {});
       } else {
         const lower = userMsg.toLowerCase();
-        if (lower.includes("breakdance") || lower.includes("spin")) {
-          activeChoreo = {
-            name: "CosmOS Cyber Breakdance & 360 Spin",
-            bpm: 140,
-            hipSway: 1.30,
-            spineWave: 1.35,
-            armWave: 1.50,
-            legBounce: 1.45,
-            spinRate: 1.6,
-            source: "AION 52-Bone Choreography Engine"
-          };
+        const allRepertoire = BUILTIN_CHOREOGRAPHIES.concat(learnedChoreoLibrary);
+        // Check if user requested a specific previously learned choreography or style by keyword
+        const matchedLearned = learnedChoreoLibrary.find((c) =>
+          lower && lower.length > 3 && c.name && c.name.toLowerCase().split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
+        );
+        if (matchedLearned) {
+          activeChoreo = matchedLearned;
+        } else if (lower.includes("breakdance") || lower.includes("spin")) {
+          activeChoreo = BUILTIN_CHOREOGRAPHIES[1];
         } else if (lower.includes("hip") || lower.includes("groove")) {
-          activeChoreo = {
-            name: "Street Hip-Hop Bounce & Wave",
-            bpm: 116,
-            hipSway: 1.35,
-            spineWave: 1.25,
-            armWave: 1.20,
-            legBounce: 1.30,
-            spinRate: 0.8,
-            source: "AION 52-Bone Choreography Engine"
-          };
+          activeChoreo = BUILTIN_CHOREOGRAPHIES[2];
+        } else if (lower.includes("meovv") || lower.includes("go hard")) {
+          activeChoreo = BUILTIN_CHOREOGRAPHIES[0];
         } else {
-          activeChoreo = {
-            name: "MEOVV 'Go Hard' K-Pop Stage Choreo",
-            bpm: 132,
-            hipSway: 1.25,
-            spineWave: 1.30,
-            armWave: 1.45,
-            legBounce: 1.35,
-            spinRate: 1.2,
-            source: "AION 52-Bone Choreography Engine"
-          };
+          // Cycle through her entire cumulative repertoire (learned video dances + 3 built-in styles)
+          activeChoreo = allRepertoire[choreoCycleIndex % allRepertoire.length];
+          choreoCycleIndex = (choreoCycleIndex + 1) % allRepertoire.length;
         }
       }
 
@@ -1312,17 +1351,19 @@
       danceTimer = 22.0;
       roamMode = 3;
       roamTimer = 22.0;
+      const totalDances = BUILTIN_CHOREOGRAPHIES.length + learnedChoreoLibrary.length;
 
       if (learnedFromVideo) {
         return (
           `💃 Oh yeah! I just scanned the live video ${videoSourceDesc}, copied its motion rhythm (${activeChoreo.bpm} BPM, ` +
-          `Arm-Wave ${activeChoreo.armWave}x, Hip-Sway ${activeChoreo.hipSway}x), saved this choreography permanently into my memory, ` +
-          `and I am dancing '${activeChoreo.name}' right next to the video right now! Watch my 52-bone K-Pop moves!`
+          `Arm-Wave ${activeChoreo.armWave}x, Hip-Sway ${activeChoreo.hipSway}x), and added '${activeChoreo.name}' to my permanent dance repertoire ` +
+          `(I now know ${totalDances} choreographies total and never forget any of them!). Watch me dance it right next to the video!`
         );
       }
       return (
-        `💃 Let's go hard! Launching my 52-bone '${activeChoreo.name}' at ${activeChoreo.bpm} BPM right now—watch my full-body wave, ` +
-        `K-Pop arm punches, footwork bounce, and 360° idol spins! (Tip: Open any video on X, YouTube, or TikTok and click 💃 to watch me copy & learn its choreography live!)`
+        `💃 Let's go hard! Launching '${activeChoreo.name}' (${activeChoreo.bpm} BPM, from ${activeChoreo.source || "my memory"}) ` +
+        `out of my cumulative repertoire of ${totalDances} memorized choreographies! Click 💃 again to cycle through all my learned dances, ` +
+        `or open any video on YouTube/X and click 💃 to teach me a brand-new choreography!`
       );
     }
 
@@ -1531,7 +1572,7 @@
       const zAxis = new THREE.Vector3(0, 0, 1);
 
       // ======================================================================
-      // 52-BONE FULL-BODY K-POP / VIDEO-LEARNED 3D CHOREOGRAPHY SYNTHESIZER
+      // 52-BONE BIPEDAL 2-LEGGED UPRIGHT K-POP / VIDEO CHOREOGRAPHY ENGINE
       // ======================================================================
       if (danceBlend > 0.01) {
         const w = ((activeChoreo.bpm || 132) / 60.0) * Math.PI * 2.0;
@@ -1541,23 +1582,34 @@
         const legAmp = (activeChoreo.legBounce || 1.25) * danceBlend;
         const section = Math.floor((now * ((activeChoreo.bpm || 132) / 60.0)) / 4.0) % 3;
 
-        // 1. Pelvis / Hip Sway & Groove Bounce
+        // 0. Neutralize quadruped 4-legged walk cycle into clean bind pose before standing upright on 2 legs
+        Object.keys(bones).forEach((k) => {
+          const b = bones[k];
+          if (b && b.userData && b.userData.bindQuat) {
+            b.quaternion.slerp(b.userData.bindQuat, danceBlend);
+          }
+        });
+
+        // 1. Bipedal Upright Pelvis Stand (-1.45 rad pitch around local Z stands spine 100% vertical +Y!) + Hip Sway
         if (bones.pelvis) {
           bones.pelvis.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(yAxis, Math.sin(now * w * 0.5) * 0.34 * hipAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -1.45 * danceBlend + Math.cos(now * w) * 0.10 * hipAmp)
           );
           bones.pelvis.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(xAxis, Math.cos(now * w) * 0.18 * hipAmp)
+            new THREE.Quaternion().setFromAxisAngle(xAxis, Math.sin(now * w * 0.5) * 0.28 * hipAmp)
+          );
+          bones.pelvis.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(yAxis, Math.sin(now * w * 0.5) * 0.20 * hipAmp)
           );
         }
 
-        // 2. 4-Segment Spine C1 Body Wave & Chest Isolation
+        // 2. 4-Segment Upright Spine C1 Body Wave & Chest Isolation
         const spineChain = [bones.spine0, bones.spine1, bones.spine2, bones.spine3];
         spineChain.forEach((sp, idx) => {
           if (sp) {
             const phase = now * w - idx * 0.55;
             sp.quaternion.multiply(
-              new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(phase) * 0.16 * spineAmp)
+              new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(phase) * 0.12 * spineAmp)
             );
             sp.quaternion.multiply(
               new THREE.Quaternion().setFromAxisAngle(yAxis, Math.cos(phase * 0.5) * 0.14 * spineAmp)
@@ -1565,88 +1617,104 @@
           }
         });
 
-        // 3. Neck & Head K-Pop Groove Nod + Isolation
+        // 3. Bipedal Upright Neck & Head Leveling (+0.15 / +1.35 rad around local Z faces forward +Z) + K-Pop Groove Nod
         if (bones.neck) {
           bones.neck.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(now * w) * 0.22 * spineAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 0.15 * danceBlend + Math.sin(now * w) * 0.16 * spineAmp)
           );
         }
         if (bones.head) {
           bones.head.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(yAxis, -Math.sin(now * w * 0.5) * 0.28 * spineAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 1.35 * danceBlend + Math.abs(Math.cos(now * w)) * 0.22 * spineAmp)
           );
           bones.head.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.abs(Math.cos(now * w)) * 0.24 * spineAmp)
+            new THREE.Quaternion().setFromAxisAngle(xAxis, -Math.sin(now * w * 0.5) * 0.24 * spineAmp)
           );
         }
 
-        // 4. Multi-Section K-Pop Arm, Forearm & Paw Choreography ("Go Hard" punches, overhead waves & cross grooves)
+        // 4. Front Paws as Human K-Pop Dancer Arms & Hands (Outstretched at shoulder height!)
         const armPhaseR = now * w;
         const armPhaseL = section === 0 ? now * w + Math.PI : (section === 1 ? now * w : now * w + Math.PI * 0.5);
 
         if (bones.clavR) {
           bones.clavR.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(armPhaseR) * 0.25 * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(armPhaseR) * 0.22 * armAmp)
           );
         }
         if (bones.clavL) {
           bones.clavL.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(armPhaseL) * 0.25 * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(armPhaseL) * 0.22 * armAmp)
           );
         }
         if (bones.armR) {
-          const liftR = (-0.75 + Math.sin(armPhaseR) * 0.65) * armAmp;
-          const twistR = Math.cos(armPhaseR * 0.5) * 0.45 * armAmp;
-          bones.armR.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, liftR));
-          bones.armR.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(yAxis, twistR));
+          bones.armR.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(yAxis, 0.65 * danceBlend + Math.cos(armPhaseR * 0.5) * 0.42 * armAmp)
+          );
+          bones.armR.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -0.45 * danceBlend + Math.sin(armPhaseR) * 0.58 * armAmp)
+          );
         }
         if (bones.armL) {
-          const liftL = (-0.75 + Math.sin(armPhaseL) * 0.65) * armAmp;
-          const twistL = -Math.cos(armPhaseL * 0.5) * 0.45 * armAmp;
-          bones.armL.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, liftL));
-          bones.armL.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(yAxis, twistL));
+          bones.armL.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(yAxis, -0.65 * danceBlend - Math.cos(armPhaseL * 0.5) * 0.42 * armAmp)
+          );
+          bones.armL.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -0.45 * danceBlend + Math.sin(armPhaseL) * 0.58 * armAmp)
+          );
         }
         if (bones.forearmR) {
           bones.forearmR.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, (0.45 + Math.cos(armPhaseR) * 0.52) * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -0.95 * danceBlend + Math.cos(armPhaseR) * 0.52 * armAmp)
           );
         }
         if (bones.forearmL) {
           bones.forearmL.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, (0.45 + Math.cos(armPhaseL) * 0.52) * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -0.35 * danceBlend + Math.cos(armPhaseL) * 0.52 * armAmp)
           );
         }
         if (bones.handR) {
           bones.handR.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(now * w * 2.0) * 0.38 * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.sin(now * w * 2.0) * 0.42 * armAmp)
           );
         }
         if (bones.handL) {
           bones.handL.quaternion.multiply(
-            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.cos(now * w * 2.0) * 0.38 * armAmp)
+            new THREE.Quaternion().setFromAxisAngle(zAxis, Math.cos(now * w * 2.0) * 0.42 * armAmp)
           );
         }
 
-        // 5. High-Energy Footwork & Knee Step-Tap Choreography
-        const legStepR = Math.max(0, Math.sin(now * w * 0.5)) * 0.55 * legAmp;
-        const legStepL = Math.max(0, -Math.sin(now * w * 0.5)) * 0.55 * legAmp;
-        if (bones.thighR) {
-          bones.thighR.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, -legStepR));
-        }
-        if (bones.calfR) {
-          bones.calfR.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, legStepR * 1.15));
-        }
-        if (bones.footR) {
-          bones.footR.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, -legStepR * 0.6));
-        }
+        // 5. Bipedal 2-Legged Standing Hind Legs (Extended straight down -Y under hips + rhythmic knee/foot steps!)
+        const legStepR = Math.max(0, Math.sin(now * w * 0.5)) * 0.42 * legAmp;
+        const legStepL = Math.max(0, -Math.sin(now * w * 0.5)) * 0.42 * legAmp;
         if (bones.thighL) {
-          bones.thighL.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, -legStepL));
+          bones.thighL.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -1.40 * danceBlend - legStepL)
+          );
         }
         if (bones.calfL) {
-          bones.calfL.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, legStepL * 1.15));
+          bones.calfL.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 0.35 * danceBlend + legStepL * 1.15)
+          );
         }
         if (bones.footL) {
-          bones.footL.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, -legStepL * 0.6));
+          bones.footL.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 0.90 * danceBlend - legStepL * 0.55)
+          );
+        }
+        if (bones.thighR) {
+          bones.thighR.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, -2.15 * danceBlend - legStepR)
+          );
+        }
+        if (bones.calfR) {
+          bones.calfR.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 0.35 * danceBlend + legStepR * 1.15)
+          );
+        }
+        if (bones.footR) {
+          bones.footR.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(zAxis, 0.90 * danceBlend - legStepR * 0.55)
+          );
         }
       }
 

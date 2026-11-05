@@ -565,6 +565,8 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             st = get_live_evolution_status()
             mem = load_persistent_minime_memory()
             st["learned_facts_count"] = len(mem.get("learned_facts", []))
+            st["learned_choreos_count"] = len(mem.get("learned_choreographies", []))
+            st["learned_choreographies"] = mem.get("learned_choreographies", [])
             st["total_interactions"] = mem.get("total_interactions", 0)
             threading.Thread(target=maybe_refresh_cfs_capsule, args=(st["generation"],), daemon=True).start()
             resp_bytes = json.dumps(st).encode("utf-8")
@@ -616,20 +618,26 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             choreo = body.get("choreo") or {}
             mem = load_persistent_minime_memory()
             choreos = mem.get("learned_choreographies", [])
-            choreos.append(choreo)
-            mem["learned_choreographies"] = choreos[-50:]
             c_name = choreo.get("name", "Live Video Dance")
+            # Cumulative learning: update if exact same name, otherwise append permanently without forgetting old ones
+            existing_idx = next((i for i, c in enumerate(choreos) if c.get("name") == c_name), -1)
+            if existing_idx >= 0:
+                choreos[existing_idx] = choreo
+            else:
+                choreos.append(choreo)
+            mem["learned_choreographies"] = choreos
             c_bpm = choreo.get("bpm", 128)
             fact_str = f"Learned 3D Video Dance Choreography '{c_name}' ({c_bpm} BPM, Hip-Sway={choreo.get('hipSway', 1.0)}, Arm-Wave={choreo.get('armWave', 1.0)}) from {choreo.get('source', 'webpage video')}."
             facts = mem.get("learned_facts", [])
             if fact_str not in facts:
                 facts.append(fact_str)
-                mem["learned_facts"] = facts[-200:]
+                mem["learned_facts"] = facts
             save_persistent_minime_memory(mem)
             resp_bytes = json.dumps({
                 "status": "ok",
                 "learned_facts_count": len(mem["learned_facts"]),
                 "learned_choreos_count": len(mem["learned_choreographies"]),
+                "learned_choreographies": mem["learned_choreographies"],
                 "choreo": choreo
             }).encode("utf-8")
             self.send_response(200)
