@@ -396,6 +396,18 @@
         pointer-events: auto !important;
         z-index: 2147483642 !important;
         transform: translate(-50%, -100%) !important;
+        cursor: grab !important;
+        user-select: none !important;
+      }
+      #aion-minime-speech.dragging {
+        cursor: grabbing !important;
+        box-shadow: 0 12px 36px rgba(0, 255, 200, 0.48) !important;
+      }
+      #aion-minime-speech.collapsed #aion-speech-text {
+        display: none !important;
+      }
+      #aion-minime-speech.collapsed .aion-tag {
+        margin-bottom: 0 !important;
       }
       #aion-minime-speech .aion-tag {
         display: flex !important;
@@ -407,6 +419,7 @@
         letter-spacing: 0.6px !important;
         margin-bottom: 5px !important;
         gap: 6px !important;
+        cursor: grab !important;
       }
       .aion-mini-ctrls {
         display: inline-flex !important;
@@ -482,6 +495,8 @@
         display: flex !important;
         align-items: center !important;
         justify-content: space-between !important;
+        cursor: grab !important;
+        user-select: none !important;
       }
       .aion-chat-title {
         font-weight: 700 !important;
@@ -597,16 +612,18 @@
     });
     mountRoot.appendChild(hitbox);
 
-    const speech = domEl("div", { id: "aion-minime-speech" }, [
+    const speech = domEl("div", { id: "aion-minime-speech", title: "Drag me anywhere on the screen!" }, [
       domEl("div", { className: "aion-tag" }, [
         domEl("span", {}, [
-          "🐾 AION ",
+          "✥ 🐾 AION ",
           domEl("span", { id: "aion-gen-badge", textContent: `GEN ${liveGeneration}` })
         ]),
         domEl("span", { className: "aion-mini-ctrls" }, [
           domEl("button", { className: "aion-ctrl-btn aion-dance-btn", title: "Dance & Copy Live Video Choreography!", textContent: "💃" }),
           domEl("button", { className: "aion-ctrl-btn aion-update-btn", title: "Update from GitHub & Sync Live Feeds", textContent: "🔄" }),
           domEl("button", { className: "aion-ctrl-btn aion-mute-btn", title: "Turn Sound On/Off", textContent: "🔊" }),
+          domEl("button", { className: "aion-ctrl-btn", id: "aion-speech-pin-btn", title: "Follow Cat / Unpin Speech Bubble", textContent: "🧲" }),
+          domEl("button", { className: "aion-ctrl-btn", id: "aion-speech-collapse-btn", title: "Collapse / Expand Popup Text", textContent: "▾" }),
           domEl("button", { className: "aion-ctrl-btn aion-min-btn", title: "Minimize Mini-Me AION", textContent: "_" }),
           domEl("button", { className: "aion-ctrl-btn danger aion-close-btn", title: "Close Mini-Me AION", textContent: "×" })
         ])
@@ -614,7 +631,7 @@
       domEl("div", {
         id: "aion-speech-text",
         "data-is-default-greeting": "1",
-        textContent: `Hi! I'm Mini-Me Aion (Gen ${liveGeneration}). Click me to chat in English!`
+        textContent: `Hi! I'm Mini-Me Aion (Gen ${liveGeneration}). Drag this box anywhere or click me to chat!`
       })
     ]);
     mountRoot.appendChild(speech);
@@ -1422,8 +1439,178 @@
       setTimeout(() => inputEl.focus(), 100);
     }
 
-    ui.hitbox.addEventListener("click", triggerGreetingAndOpenChat);
-    speechTextEl.addEventListener("click", triggerGreetingAndOpenChat);
+    // ========================================================================
+    // DRAGGABLE POPUP SPEECH BOX, DRAGGABLE CHAT CONSOLE & DRAGGABLE 3D CAT
+    // ========================================================================
+    let speechPinned = false;
+    let speechPinX = 0;
+    let speechPinY = 0;
+    try {
+      const savedPin = JSON.parse(localStorage.getItem("aion_minime_speech_pin") || "null");
+      if (savedPin && typeof savedPin.x === "number" && typeof savedPin.y === "number") {
+        speechPinned = Boolean(savedPin.pinned);
+        speechPinX = Math.max(160, Math.min(window.innerWidth - 160, savedPin.x));
+        speechPinY = Math.max(60, Math.min(window.innerHeight - 20, savedPin.y));
+      }
+    } catch (e) {}
+
+    const speechPinBtn = document.getElementById("aion-speech-pin-btn");
+    const speechCollapseBtn = document.getElementById("aion-speech-collapse-btn");
+
+    function updateSpeechPinBadge() {
+      if (speechPinBtn) {
+        speechPinBtn.textContent = speechPinned ? "📌" : "🧲";
+        speechPinBtn.title = speechPinned
+          ? "Pinned at custom position (Click to auto-follow cat again)"
+          : "Auto-following cat (Drag popup anywhere to pin it)";
+      }
+    }
+    updateSpeechPinBadge();
+
+    if (speechPinBtn) {
+      speechPinBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        speechPinned = !speechPinned;
+        if (speechPinned) {
+          const r = ui.speech.getBoundingClientRect();
+          speechPinX = r.left + r.width * 0.5;
+          speechPinY = r.bottom;
+        }
+        try {
+          localStorage.setItem("aion_minime_speech_pin", JSON.stringify({ pinned: speechPinned, x: speechPinX, y: speechPinY }));
+        } catch (err) {}
+        updateSpeechPinBadge();
+      });
+    }
+
+    if (speechCollapseBtn) {
+      speechCollapseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const collapsed = ui.speech.classList.toggle("collapsed");
+        speechCollapseBtn.textContent = collapsed ? "▸" : "▾";
+      });
+    }
+
+    // 1. Make Speech Popup freely draggable anywhere on screen
+    let isDraggingSpeech = false;
+    let speechDragMoved = false;
+    let speechDragStartX = 0;
+    let speechDragStartY = 0;
+    let speechOrigX = 0;
+    let speechOrigY = 0;
+
+    ui.speech.addEventListener("mousedown", (e) => {
+      if (e.target && e.target.closest("button")) return;
+      isDraggingSpeech = true;
+      speechDragMoved = false;
+      speechDragStartX = e.clientX;
+      speechDragStartY = e.clientY;
+      const r = ui.speech.getBoundingClientRect();
+      speechOrigX = r.left + r.width * 0.5;
+      speechOrigY = r.bottom;
+      ui.speech.classList.add("dragging");
+      e.preventDefault();
+    });
+
+    // 2. Make Chat Console draggable via its header bar
+    let isDraggingChat = false;
+    let chatDragStartX = 0;
+    let chatDragStartY = 0;
+    let chatOrigLeft = 0;
+    let chatOrigTop = 0;
+    const chatHeaderEl = ui.chatbox.querySelector(".aion-chat-header");
+    if (chatHeaderEl) {
+      chatHeaderEl.addEventListener("mousedown", (e) => {
+        if (e.target && e.target.closest("button")) return;
+        isDraggingChat = true;
+        chatDragStartX = e.clientX;
+        chatDragStartY = e.clientY;
+        const r = ui.chatbox.getBoundingClientRect();
+        chatOrigLeft = r.left;
+        chatOrigTop = r.top;
+        e.preventDefault();
+      });
+    }
+
+    // 3. Make 3D Cat draggable via hitbox (click without drag opens chat)
+    let isDraggingCat = false;
+    let catDragMoved = false;
+    let catDragStartX = 0;
+    let catDragStartY = 0;
+    let catOrigX = 0;
+    let catOrigY = 0;
+
+    ui.hitbox.addEventListener("mousedown", (e) => {
+      isDraggingCat = true;
+      catDragMoved = false;
+      catDragStartX = e.clientX;
+      catDragStartY = e.clientY;
+      catOrigX = screenX;
+      catOrigY = screenY;
+      e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (isDraggingSpeech) {
+        const dx = e.clientX - speechDragStartX;
+        const dy = e.clientY - speechDragStartY;
+        if (Math.hypot(dx, dy) > 4) speechDragMoved = true;
+        speechPinned = true;
+        speechPinX = Math.max(140, Math.min(window.innerWidth - 140, speechOrigX + dx));
+        speechPinY = Math.max(48, Math.min(window.innerHeight - 12, speechOrigY + dy));
+        ui.speech.style.left = `${speechPinX}px`;
+        ui.speech.style.top = `${speechPinY}px`;
+        updateSpeechPinBadge();
+      }
+      if (isDraggingChat) {
+        const dx = e.clientX - chatDragStartX;
+        const dy = e.clientY - chatDragStartY;
+        const newLeft = Math.max(8, Math.min(window.innerWidth - 385, chatOrigLeft + dx));
+        const newTop = Math.max(8, Math.min(window.innerHeight - 120, chatOrigTop + dy));
+        ui.chatbox.style.setProperty("left", `${newLeft}px`, "important");
+        ui.chatbox.style.setProperty("top", `${newTop}px`, "important");
+        ui.chatbox.style.setProperty("right", "auto", "important");
+        ui.chatbox.style.setProperty("bottom", "auto", "important");
+      }
+      if (isDraggingCat) {
+        const dx = e.clientX - catDragStartX;
+        const dy = e.clientY - catDragStartY;
+        if (Math.hypot(dx, dy) > 5) catDragMoved = true;
+        if (catDragMoved) {
+          screenX = Math.max(80, Math.min(window.innerWidth - 80, catOrigX + dx));
+          screenY = Math.max(110, Math.min(window.innerHeight - 80, catOrigY + dy));
+          targetX = screenX;
+          targetY = screenY;
+          roamMode = 2;
+          roamTimer = 8.0;
+        }
+      }
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (isDraggingSpeech) {
+        isDraggingSpeech = false;
+        ui.speech.classList.remove("dragging");
+        if (speechPinned) {
+          try {
+            localStorage.setItem("aion_minime_speech_pin", JSON.stringify({ pinned: true, x: speechPinX, y: speechPinY }));
+          } catch (err) {}
+        }
+      }
+      if (isDraggingChat) {
+        isDraggingChat = false;
+      }
+      if (isDraggingCat) {
+        isDraggingCat = false;
+      }
+    });
+
+    ui.hitbox.addEventListener("click", () => {
+      if (!catDragMoved) triggerGreetingAndOpenChat();
+    });
+    speechTextEl.addEventListener("click", () => {
+      if (!speechDragMoved) triggerGreetingAndOpenChat();
+    });
 
     document.querySelectorAll(".aion-dance-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
@@ -1559,8 +1746,14 @@
 
       ui.hitbox.style.left = `${screenX}px`;
       ui.hitbox.style.top = `${screenY}px`;
-      ui.speech.style.left = `${Math.max(170, Math.min(window.innerWidth - 170, screenX))}px`;
-      ui.speech.style.top = `${Math.max(75, screenY - 95)}px`;
+      if (speechPinned) {
+        ui.speech.style.left = `${speechPinX}px`;
+        ui.speech.style.top = `${speechPinY}px`;
+      } else {
+        const autoLift = isDancing ? 132 : 102;
+        ui.speech.style.left = `${Math.max(170, Math.min(window.innerWidth - 170, screenX))}px`;
+        ui.speech.style.top = `${Math.max(75, screenY - autoLift)}px`;
+      }
 
       if (mixer) {
         const animRate = moveSpeedPx > 10 ? 0.55 + (moveSpeedPx / 150.0) * 1.15 : 0.35;
