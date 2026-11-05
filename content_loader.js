@@ -1,12 +1,14 @@
 /**
- * AION Everywhere (Manifest V3 Content Loader & Zero-CSP-Violation Bridge)
- * =========================================================================
+ * AION Everywhere (Manifest V3 Content Loader & YouTube/X Zero-CSP/TrustedTypes Bridge)
+ * =====================================================================================
  * 1. Passes the extension base URL and bridge status via DOM dataset attributes
- *    on `document.documentElement` (NEVER blocked by strict `script-src` CSP on x.com!).
- * 2. Bridges `window.postMessage` requests from the page script to the privileged
- *    extension `background.js` worker using Firefox Promise API (`browser.runtime.sendMessage`)
- *    and Chrome callback API (`chrome.runtime.sendMessage`), plus direct content-script
- *    fetch fallback to `http://127.0.0.1:8788`.
+ *    on `document.documentElement` (NEVER blocked by strict `script-src` or `TrustedTypes` on YouTube/X!).
+ * 2. Loads `aion_minime_easter_egg.cfs` binary capsule directly in the privileged Content Script
+ *    context (`__LOAD_CFS_BINARY__`) so strict `connect-src` CSPs on YouTube/X can never block
+ *    unpacking the 3D Tuxedo Cat GLB!
+ * 3. Sequentially injects `three.min.js` -> `GLTFLoader.js` -> `aion_minime_easter_egg.js`
+ *    from the privileged Content Script context so page-world `TrustedScriptURL` on YouTube
+ *    never blocks script loading!
  */
 (function () {
   if (document.documentElement.getAttribute("data-aion-ext-bridge") === "1") return;
@@ -15,12 +17,31 @@
   const runtimeAPI = isFirefox ? browser.runtime : chrome.runtime;
   const baseUrl = runtimeAPI.getURL("");
 
-  // Set DOM attributes on <html> — 100% immune to inline <script> CSP blocks on x.com / github.com!
   document.documentElement.setAttribute("data-aion-ext-bridge", "1");
   document.documentElement.setAttribute("data-aion-base-url", baseUrl);
 
   async function forwardToBackgroundOrLocal(path, method, body) {
-    // 1. Route via privileged background.js worker
+    // Special handler: Load the 353 KB CFS1 binary capsule from the privileged extension context
+    if (path === "__LOAD_CFS_BINARY__") {
+      try {
+        const cfsUrl = runtimeAPI.getURL("aion_minime_easter_egg.cfs");
+        const res = await fetch(cfsUrl);
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          return { ok: true, status: 200, cfsBytes: new Uint8Array(ab) };
+        }
+      } catch (e) {}
+      try {
+        const res2 = await fetch("http://127.0.0.1:8788/aion_minime_easter_egg.cfs");
+        if (res2.ok) {
+          const ab2 = await res2.arrayBuffer();
+          return { ok: true, status: 200, cfsBytes: new Uint8Array(ab2) };
+        }
+      } catch (e2) {}
+      return { ok: false, status: 500, data: null };
+    }
+
+    // 1. Route API requests via privileged background.js worker
     try {
       let bgResp = null;
       if (isFirefox) {
@@ -84,9 +105,20 @@
     );
   });
 
-  const s = document.createElement("script");
-  s.id = "aion-everywhere-injected";
-  s.src = runtimeAPI.getURL("aion_minime_easter_egg.js");
-  s.async = true;
-  (document.head || document.documentElement).appendChild(s);
+  function injectExtensionScript(fileName) {
+    return new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = runtimeAPI.getURL(fileName);
+      s.async = false;
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      (document.head || document.documentElement).appendChild(s);
+    });
+  }
+
+  (async function bootSequence() {
+    await injectExtensionScript("three.min.js");
+    await injectExtensionScript("GLTFLoader.js");
+    await injectExtensionScript("aion_minime_easter_egg.js");
+  })();
 })();

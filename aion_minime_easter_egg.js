@@ -252,7 +252,11 @@
     }
     const cfsBar = document.getElementById("aion-cfs-bar");
     if (cfsBar) {
-      cfsBar.innerHTML = `<span>CFS1: 353 KB</span><span>🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)</span>`;
+      const s1 = document.createElement("span");
+      s1.textContent = "CFS1: 353 KB";
+      const s2 = document.createElement("span");
+      s2.textContent = `🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)`;
+      cfsBar.replaceChildren(s1, s2);
     }
   }
 
@@ -295,8 +299,22 @@
   }
 
   // ==========================================================================
-  // 4. BUILD UI OVERLAY, CONTROLS (MUTE, MINIMIZE, CLOSE) & CHAT CONSOLE
+  // 4. BUILD UI OVERLAY (100% TRUSTED-TYPES SAFE FOR YOUTUBE / GOOGLE / X)
   // ==========================================================================
+  function domEl(tag, attrs = {}, children = []) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "className") el.className = v;
+      else if (k === "textContent") el.textContent = v;
+      else el.setAttribute(k, v);
+    }
+    for (const ch of children) {
+      if (typeof ch === "string") el.appendChild(document.createTextNode(ch));
+      else if (ch) el.appendChild(ch);
+    }
+    return el;
+  }
+
   function createOverlayDOM() {
     const style = document.createElement("style");
     style.textContent = `
@@ -530,79 +548,103 @@
     `;
     document.head.appendChild(style);
 
-    const canvas = document.createElement("canvas");
-    canvas.id = "aion-minime-canvas";
-    document.body.appendChild(canvas);
+    const mountRoot = document.body || document.documentElement;
 
-    const hitbox = document.createElement("div");
-    hitbox.id = "aion-minime-hitbox";
-    hitbox.title = "Click Mini-Me AION to greet & chat in English!";
-    document.body.appendChild(hitbox);
+    const canvas = domEl("canvas", { id: "aion-minime-canvas" });
+    mountRoot.appendChild(canvas);
 
-    const speech = document.createElement("div");
-    speech.id = "aion-minime-speech";
-    speech.innerHTML = `
-      <div class="aion-tag">
-        <span>🐾 AION <span id="aion-gen-badge">GEN ${liveGeneration}</span></span>
-        <span class="aion-mini-ctrls">
-          <button class="aion-ctrl-btn aion-dance-btn" title="Dance & Copy Live Video Choreography!">💃</button>
-          <button class="aion-ctrl-btn aion-update-btn" title="Update from GitHub & Sync Live Feeds">🔄</button>
-          <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
-          <button class="aion-ctrl-btn aion-min-btn" title="Minimize Mini-Me AION">_</button>
-          <button class="aion-ctrl-btn danger aion-close-btn" title="Close Mini-Me AION">&times;</button>
-        </span>
-      </div>
-      <div id="aion-speech-text" data-is-default-greeting="1">Hi! I'm Mini-Me Aion (Gen ${liveGeneration}). Click me to chat in English!</div>
-    `;
-    document.body.appendChild(speech);
+    const hitbox = domEl("div", {
+      id: "aion-minime-hitbox",
+      title: "Click Mini-Me AION to greet & chat in English!"
+    });
+    mountRoot.appendChild(hitbox);
 
-    const pill = document.createElement("div");
-    pill.id = "aion-minime-pill";
-    pill.innerHTML = `
-      <span>🐾 AION</span>
-      <span class="aion-chat-badge" id="aion-pill-gen">GEN ${liveGeneration}</span>
-      <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
-      <button class="aion-ctrl-btn" id="aion-pill-restore" title="Restore 3D Avatar">Restore</button>
-      <button class="aion-ctrl-btn danger aion-close-btn" title="Close">&times;</button>
-    `;
-    document.body.appendChild(pill);
+    const speech = domEl("div", { id: "aion-minime-speech" }, [
+      domEl("div", { className: "aion-tag" }, [
+        domEl("span", {}, [
+          "🐾 AION ",
+          domEl("span", { id: "aion-gen-badge", textContent: `GEN ${liveGeneration}` })
+        ]),
+        domEl("span", { className: "aion-mini-ctrls" }, [
+          domEl("button", { className: "aion-ctrl-btn aion-dance-btn", title: "Dance & Copy Live Video Choreography!", textContent: "💃" }),
+          domEl("button", { className: "aion-ctrl-btn aion-update-btn", title: "Update from GitHub & Sync Live Feeds", textContent: "🔄" }),
+          domEl("button", { className: "aion-ctrl-btn aion-mute-btn", title: "Turn Sound On/Off", textContent: "🔊" }),
+          domEl("button", { className: "aion-ctrl-btn aion-min-btn", title: "Minimize Mini-Me AION", textContent: "_" }),
+          domEl("button", { className: "aion-ctrl-btn danger aion-close-btn", title: "Close Mini-Me AION", textContent: "×" })
+        ])
+      ]),
+      domEl("div", {
+        id: "aion-speech-text",
+        "data-is-default-greeting": "1",
+        textContent: `Hi! I'm Mini-Me Aion (Gen ${liveGeneration}). Click me to chat in English!`
+      })
+    ]);
+    mountRoot.appendChild(speech);
 
-    const chatbox = document.createElement("div");
-    chatbox.id = "aion-minime-chatbox";
-    chatbox.innerHTML = `
-      <div class="aion-chat-header">
-        <div class="aion-chat-title">
-          <span>🐱 AION MINI-ME</span>
-          <span class="aion-chat-badge" id="aion-chat-gen-badge">GEN ${liveGeneration}</span>
-          <span class="aion-chat-badge" id="aion-bridge-mode">120B NEXUS</span>
-        </div>
-        <div class="aion-mini-ctrls">
-          <button class="aion-ctrl-btn aion-dance-btn" title="Dance & Learn Choreography from Live Video!">💃</button>
-          <button class="aion-ctrl-btn aion-update-btn" title="Pull Latest Version from GitHub & Refresh Live Feeds">🔄</button>
-          <button class="aion-ctrl-btn" id="aion-chat-clear" title="Clear Chat View (Memory stays intact)">🗑️</button>
-          <button class="aion-ctrl-btn aion-mute-btn" title="Turn Sound On/Off">🔊</button>
-          <button class="aion-ctrl-btn aion-min-btn" title="Minimize Avatar & Chat">_</button>
-          <button class="aion-ctrl-btn" id="aion-chat-hide" title="Hide Chat Window">&ndash;</button>
-          <button class="aion-ctrl-btn danger aion-close-btn" title="Close Mini-Me AION">&times;</button>
-        </div>
-      </div>
-      <div class="aion-cfs-bar" id="aion-cfs-bar">
-        <span>CFS1: 353 KB</span>
-        <span>🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)</span>
-      </div>
-      <div class="aion-chat-messages" id="aion-chat-messages"></div>
-      <div class="aion-quick-actions">
-        <button class="aion-quick-btn" data-q="Copy and learn the dance choreography from the live video on this page and dance Go Hard!">💃 Dance / Copy Video</button>
-        <button class="aion-quick-btn" data-q="Pull the latest live world, tech, and AI news headlines and analyze the biggest stories today!">📰 Live World & Tech News</button>
-        <button class="aion-quick-btn" data-q="Read and summarize this webpage for me!">🔍 Summarize Page</button>
-        <button class="aion-quick-btn" data-q="Point at something interesting on this page!">👉 Point with Paw</button>
-      </div>
-      <div class="aion-chat-input-row">
-        <input type="text" class="aion-chat-input" id="aion-chat-input" placeholder="Ask Mini-Me Aion anything..." />
-        <button class="aion-chat-send" id="aion-chat-send">Send</button>
-      </div>
-    `;
-    document.body.appendChild(chatbox);
+    const pill = domEl("div", { id: "aion-minime-pill" }, [
+      domEl("span", { textContent: "🐾 AION" }),
+      domEl("span", { className: "aion-chat-badge", id: "aion-pill-gen", textContent: `GEN ${liveGeneration}` }),
+      domEl("button", { className: "aion-ctrl-btn aion-mute-btn", title: "Turn Sound On/Off", textContent: "🔊" }),
+      domEl("button", { className: "aion-ctrl-btn", id: "aion-pill-restore", title: "Restore 3D Avatar", textContent: "Restore" }),
+      domEl("button", { className: "aion-ctrl-btn danger aion-close-btn", title: "Close", textContent: "×" })
+    ]);
+    mountRoot.appendChild(pill);
+
+    const chatbox = domEl("div", { id: "aion-minime-chatbox" }, [
+      domEl("div", { className: "aion-chat-header" }, [
+        domEl("div", { className: "aion-chat-title" }, [
+          domEl("span", { textContent: "🐱 AION MINI-ME" }),
+          domEl("span", { className: "aion-chat-badge", id: "aion-chat-gen-badge", textContent: `GEN ${liveGeneration}` }),
+          domEl("span", { className: "aion-chat-badge", id: "aion-bridge-mode", textContent: "120B NEXUS" })
+        ]),
+        domEl("div", { className: "aion-mini-ctrls" }, [
+          domEl("button", { className: "aion-ctrl-btn aion-dance-btn", title: "Dance & Learn Choreography from Live Video!", textContent: "💃" }),
+          domEl("button", { className: "aion-ctrl-btn aion-update-btn", title: "Pull Latest Version from GitHub & Refresh Live Feeds", textContent: "🔄" }),
+          domEl("button", { className: "aion-ctrl-btn", id: "aion-chat-clear", title: "Clear Chat View (Memory stays intact)", textContent: "🗑️" }),
+          domEl("button", { className: "aion-ctrl-btn aion-mute-btn", title: "Turn Sound On/Off", textContent: "🔊" }),
+          domEl("button", { className: "aion-ctrl-btn aion-min-btn", title: "Minimize Avatar & Chat", textContent: "_" }),
+          domEl("button", { className: "aion-ctrl-btn", id: "aion-chat-hide", title: "Hide Chat Window", textContent: "–" }),
+          domEl("button", { className: "aion-ctrl-btn danger aion-close-btn", title: "Close Mini-Me AION", textContent: "×" })
+        ])
+      ]),
+      domEl("div", { className: "aion-cfs-bar", id: "aion-cfs-bar" }, [
+        domEl("span", { textContent: "CFS1: 353 KB" }),
+        domEl("span", { textContent: `🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)` })
+      ]),
+      domEl("div", { className: "aion-chat-messages", id: "aion-chat-messages" }),
+      domEl("div", { className: "aion-quick-actions" }, [
+        domEl("button", {
+          className: "aion-quick-btn",
+          "data-q": "Copy and learn the dance choreography from the live video on this page and dance Go Hard!",
+          textContent: "💃 Dance / Copy Video"
+        }),
+        domEl("button", {
+          className: "aion-quick-btn",
+          "data-q": "Pull the latest live world, tech, and AI news headlines and analyze the biggest stories today!",
+          textContent: "📰 Live World & Tech News"
+        }),
+        domEl("button", {
+          className: "aion-quick-btn",
+          "data-q": "Read and summarize this webpage for me!",
+          textContent: "🔍 Summarize Page"
+        }),
+        domEl("button", {
+          className: "aion-quick-btn",
+          "data-q": "Point at something interesting on this page!",
+          textContent: "👉 Point with Paw"
+        })
+      ]),
+      domEl("div", { className: "aion-chat-input-row" }, [
+        domEl("input", {
+          type: "text",
+          className: "aion-chat-input",
+          id: "aion-chat-input",
+          placeholder: "Ask Mini-Me Aion anything..."
+        }),
+        domEl("button", { className: "aion-chat-send", id: "aion-chat-send", textContent: "Send" })
+      ])
+    ]);
+    mountRoot.appendChild(chatbox);
 
     return { canvas, hitbox, speech, pill, chatbox };
   }
@@ -890,7 +932,7 @@
       chatClearBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         chatHistory.length = 0;
-        messagesEl.innerHTML = "";
+        messagesEl.replaceChildren();
         appendChatMessage(
           "aion",
           `Chat view cleared! My permanent memory (${learnedFactsCount} learned facts) at Generation ${liveGeneration} remains 100% intact. Ask me anything!`
@@ -935,18 +977,22 @@
       return div;
     }
 
-    // 1. Load & unpack aion_minime_easter_egg.cfs + sync real-time generation
+    // 1. Load & unpack aion_minime_easter_egg.cfs (via privileged extension bridge first for YouTube/X CSP safety!)
     let cfsData = null;
     try {
-      const cfsUrl = getAssetUrl("aion_minime_easter_egg.cfs");
-      const resp = await fetch(cfsUrl);
-      const ab = await resp.arrayBuffer();
+      let ab = null;
+      const extCfs = await bridgeRequest("__LOAD_CFS_BINARY__", "GET", null, 5000);
+      if (extCfs && extCfs.ok && extCfs.cfsBytes) {
+        const u8 = extCfs.cfsBytes instanceof Uint8Array ? extCfs.cfsBytes : new Uint8Array(Object.values(extCfs.cfsBytes));
+        ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+      } else {
+        const cfsUrl = getAssetUrl("aion_minime_easter_egg.cfs");
+        const resp = await fetch(cfsUrl);
+        ab = await resp.arrayBuffer();
+      }
       cfsData = await unpackCFSCapsule(ab);
       window.__AION_CFS_CAPSULE__ = cfsData;
-
-      if (cfsBarEl) {
-        cfsBarEl.innerHTML = `<span>CFS1 (${cfsData.superblock.magic}): ${cfsData.superblock.capsuleSizeKB} KB</span><span>Voice: English Neural</span>`;
-      }
+      updateAllGenerationBadges();
     } catch (err) {
       console.warn("[AION Mini-Me] CFS unpack warning:", err);
     }
@@ -965,7 +1011,7 @@
         if (Array.isArray(memRes.data.conversation_history) && memRes.data.conversation_history.length > 0) {
           const recentTurns = memRes.data.conversation_history.slice(-10);
           chatHistory.length = 0;
-          messagesEl.innerHTML = "";
+          messagesEl.replaceChildren();
           recentTurns.forEach((turn) => {
             if (turn && turn.role && turn.content) {
               chatHistory.push({ role: turn.role, content: turn.content });

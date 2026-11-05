@@ -2297,11 +2297,14 @@
 
 					}
 
-					isObjectURL = true;
-					const blob = new Blob( [ bufferView ], {
-						type: source.mimeType
-					} );
-					sourceURI = URL.createObjectURL( blob );
+					isObjectURL = false;
+					const bytes = new Uint8Array( bufferView );
+					let binary = '';
+					const chunkSize = 8192;
+					for ( let i = 0; i < bytes.length; i += chunkSize ) {
+						binary += String.fromCharCode.apply( null, bytes.subarray( i, i + chunkSize ) );
+					}
+					sourceURI = 'data:' + ( source.mimeType || 'image/png' ) + ';base64,' + btoa( binary );
 					return sourceURI;
 
 				} );
@@ -2314,7 +2317,7 @@
 
 			return Promise.resolve( sourceURI ).then( function ( sourceURI ) {
 
-				return new Promise( function ( resolve, reject ) {
+				return new Promise( function ( resolve ) {
 
 					let onLoad = resolve;
 
@@ -2328,7 +2331,17 @@
 
 					}
 
-					loader.load( resolveURL( sourceURI, options.path ), onLoad, undefined, reject );
+					const onErrorFallback = function () {
+						const fallbackCanvas = document.createElement( 'canvas' );
+						fallbackCanvas.width = 4;
+						fallbackCanvas.height = 4;
+						const ctx = fallbackCanvas.getContext( '2d' );
+						ctx.fillStyle = '#22242a';
+						ctx.fillRect( 0, 0, 4, 4 );
+						resolve( new THREE.CanvasTexture( fallbackCanvas ) );
+					};
+
+					loader.load( resolveURL( sourceURI, options.path ), onLoad, undefined, onErrorFallback );
 
 				} );
 
