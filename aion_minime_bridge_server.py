@@ -564,9 +564,11 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
         if self.path.startswith("/api/status"):
             st = get_live_evolution_status()
             mem = load_persistent_minime_memory()
-            st["learned_facts_count"] = len(mem.get("learned_facts", []))
-            st["learned_choreos_count"] = len(mem.get("learned_choreographies", []))
+            st["learned_facts"] = mem.get("learned_facts", [])
+            st["learned_facts_count"] = len(st["learned_facts"])
             st["learned_choreographies"] = mem.get("learned_choreographies", [])
+            st["learned_choreos_count"] = len(st["learned_choreographies"])
+            st["disabled_builtin_dances"] = mem.get("disabled_builtin_dances", [])
             st["total_interactions"] = mem.get("total_interactions", 0)
             threading.Thread(target=maybe_refresh_cfs_capsule, args=(st["generation"],), daemon=True).start()
             resp_bytes = json.dumps(st).encode("utf-8")
@@ -652,10 +654,63 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             save_persistent_minime_memory(mem)
             resp_bytes = json.dumps({
                 "status": "ok",
+                "learned_facts": mem["learned_facts"],
                 "learned_facts_count": len(mem["learned_facts"]),
                 "learned_choreos_count": len(mem["learned_choreographies"]),
                 "learned_choreographies": mem["learned_choreographies"],
+                "disabled_builtin_dances": mem.get("disabled_builtin_dances", []),
                 "choreo": choreo
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+
+        if self.path.startswith("/api/delete_memory"):
+            item_type = body.get("type", "")
+            mem = load_persistent_minime_memory()
+            facts = list(mem.get("learned_facts", []))
+            choreos = list(mem.get("learned_choreographies", []))
+            disabled_builtins = list(mem.get("disabled_builtin_dances", []))
+
+            if item_type == "fact":
+                val = body.get("value")
+                idx = body.get("index")
+                if isinstance(val, str) and val in facts:
+                    facts = [f for f in facts if f != val]
+                elif isinstance(idx, int) and 0 <= idx < len(facts):
+                    facts.pop(idx)
+                mem["learned_facts"] = facts
+
+            elif item_type == "dance":
+                d_name = body.get("name")
+                idx = body.get("index")
+                is_builtin = bool(body.get("builtin", False))
+                if is_builtin and isinstance(d_name, str) and d_name:
+                    if d_name not in disabled_builtins:
+                        disabled_builtins.append(d_name)
+                    mem["disabled_builtin_dances"] = disabled_builtins
+                else:
+                    if isinstance(d_name, str) and d_name:
+                        choreos = [c for c in choreos if c.get("name") != d_name]
+                    elif isinstance(idx, int) and 0 <= idx < len(choreos):
+                        choreos.pop(idx)
+                    mem["learned_choreographies"] = choreos
+
+            elif item_type == "restore_builtin_dances":
+                disabled_builtins = []
+                mem["disabled_builtin_dances"] = disabled_builtins
+
+            save_persistent_minime_memory(mem)
+            resp_bytes = json.dumps({
+                "status": "ok",
+                "learned_facts": mem.get("learned_facts", []),
+                "learned_facts_count": len(mem.get("learned_facts", [])),
+                "learned_choreographies": mem.get("learned_choreographies", []),
+                "learned_choreos_count": len(mem.get("learned_choreographies", [])),
+                "disabled_builtin_dances": mem.get("disabled_builtin_dances", [])
             }).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -718,6 +773,7 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
                 "status": "ok",
                 "generation": st["generation"],
                 "latest_decision": st["latest_decision"],
+                "learned_facts": mem.get("learned_facts", []),
                 "learned_facts_count": len(mem.get("learned_facts", [])),
                 "bridge": "LIVE_AION_NEXUS",
                 "reply": reply

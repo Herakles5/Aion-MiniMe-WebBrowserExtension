@@ -29,7 +29,12 @@
   let liveGeneration = 5077;
   let liveDecisionTitle = "Autonomous Topological Evolution";
   let learnedFactsCount = 3;
+  let learnedFactsList = [];
   let learnedChoreoLibrary = [];
+  let disabledBuiltinDances = [];
+  let activeInspectorTab = null; // null | "facts" | "dances"
+  let renderMemoryInspectorDrawer = null;
+  let launchSpecificChoreoCallback = null;
   let choreoCycleIndex = 0;
   const BUILTIN_CHOREOGRAPHIES = [
     {
@@ -40,7 +45,8 @@
       armWave: 1.45,
       legBounce: 1.35,
       spinRate: 1.2,
-      source: "AION 52-Bone Choreography Engine"
+      source: "AION 52-Bone Choreography Engine",
+      builtin: true
     },
     {
       name: "CosmOS Cyber Breakdance & 360 Spin",
@@ -50,7 +56,8 @@
       armWave: 1.50,
       legBounce: 1.45,
       spinRate: 1.6,
-      source: "AION 52-Bone Choreography Engine"
+      source: "AION 52-Bone Choreography Engine",
+      builtin: true
     },
     {
       name: "Street Hip-Hop Bounce & Wave",
@@ -60,9 +67,54 @@
       armWave: 1.20,
       legBounce: 1.30,
       spinRate: 0.8,
-      source: "AION 52-Bone Choreography Engine"
+      source: "AION 52-Bone Choreography Engine",
+      builtin: true
     }
   ];
+
+  function getActiveBuiltinChoreos() {
+    return BUILTIN_CHOREOGRAPHIES.filter((c) => !disabledBuiltinDances.includes(c.name));
+  }
+
+  function getTotalDancesCount() {
+    return getActiveBuiltinChoreos().length + learnedChoreoLibrary.length;
+  }
+
+  function copyTextToClipboard(text, btnEl) {
+    const str = String(text || "").trim();
+    if (!str) return;
+    const flashSuccess = () => {
+      if (btnEl) {
+        const prev = btnEl.textContent;
+        btnEl.textContent = "✓";
+        setTimeout(() => {
+          btnEl.textContent = prev;
+        }, 1200);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(str).then(flashSuccess).catch(() => {
+        fallbackCopyText(str);
+        flashSuccess();
+      });
+    } else {
+      fallbackCopyText(str);
+      flashSuccess();
+    }
+  }
+
+  function fallbackCopyText(str) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = str;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch (e) {}
+  }
   let soundEnabled = true;
   let isMinimized = false;
   let isClosed = false;
@@ -302,10 +354,39 @@
     if (cfsBar) {
       const s1 = document.createElement("span");
       s1.textContent = "CFS1: 353 KB";
-      const s2 = document.createElement("span");
-      const totalDances = BUILTIN_CHOREOGRAPHIES.length + learnedChoreoLibrary.length;
-      s2.textContent = `🧠 Memory: ${learnedFactsCount} Facts • 💃 ${totalDances} Dances`;
-      cfsBar.replaceChildren(s1, s2);
+      s1.style.opacity = "0.85";
+
+      const btnGroup = document.createElement("span");
+      btnGroup.className = "aion-cfs-pills";
+
+      const factsBtn = document.createElement("button");
+      factsBtn.type = "button";
+      factsBtn.className = "aion-cfs-pill" + (activeInspectorTab === "facts" ? " active" : "");
+      factsBtn.title = "Click to list & delete individual Facts";
+      factsBtn.textContent = `🧠 Memory: ${learnedFactsCount} Facts`;
+      factsBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activeInspectorTab = activeInspectorTab === "facts" ? null : "facts";
+        updateAllGenerationBadges();
+        if (typeof renderMemoryInspectorDrawer === "function") renderMemoryInspectorDrawer();
+      });
+
+      const dancesBtn = document.createElement("button");
+      dancesBtn.type = "button";
+      const totalDances = getTotalDancesCount();
+      dancesBtn.className = "aion-cfs-pill" + (activeInspectorTab === "dances" ? " active" : "");
+      dancesBtn.title = "Click to list, play & delete individual Dances";
+      dancesBtn.textContent = `💃 ${totalDances} Dances`;
+      dancesBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activeInspectorTab = activeInspectorTab === "dances" ? null : "dances";
+        updateAllGenerationBadges();
+        if (typeof renderMemoryInspectorDrawer === "function") renderMemoryInspectorDrawer();
+      });
+
+      btnGroup.appendChild(factsBtn);
+      btnGroup.appendChild(dancesBtn);
+      cfsBar.replaceChildren(s1, btnGroup);
     }
   }
 
@@ -314,13 +395,22 @@
     if (res && res.ok && res.data && res.data.generation) {
       liveGeneration = Number(res.data.generation);
       if (res.data.latest_decision) liveDecisionTitle = res.data.latest_decision;
-      if (res.data.learned_facts_count !== undefined) {
+      if (Array.isArray(res.data.learned_facts)) {
+        learnedFactsList = res.data.learned_facts;
+        learnedFactsCount = learnedFactsList.length;
+      } else if (res.data.learned_facts_count !== undefined) {
         learnedFactsCount = Number(res.data.learned_facts_count);
       }
       if (Array.isArray(res.data.learned_choreographies)) {
         learnedChoreoLibrary = res.data.learned_choreographies;
       }
+      if (Array.isArray(res.data.disabled_builtin_dances)) {
+        disabledBuiltinDances = res.data.disabled_builtin_dances;
+      }
       updateAllGenerationBadges();
+      if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
+        renderMemoryInspectorDrawer();
+      }
     }
   }
 
@@ -410,8 +500,6 @@
         pointer-events: auto !important;
         z-index: 2147483642 !important;
         transform: translate(-50%, -100%) !important;
-        cursor: grab !important;
-        user-select: none !important;
       }
       #aion-minime-speech.dragging {
         cursor: grabbing !important;
@@ -434,6 +522,7 @@
         margin-bottom: 5px !important;
         gap: 6px !important;
         cursor: grab !important;
+        user-select: none !important;
       }
       .aion-mini-ctrls {
         display: inline-flex !important;
@@ -450,6 +539,7 @@
         line-height: 1.3 !important;
         cursor: pointer !important;
         font-family: system-ui, sans-serif !important;
+        user-select: none !important;
       }
       .aion-ctrl-btn:hover {
         background: rgba(0, 255, 200, 0.35) !important;
@@ -459,8 +549,23 @@
         background: rgba(255, 65, 105, 0.75) !important;
         border-color: #ff4169 !important;
       }
-      #aion-speech-text {
-        cursor: pointer !important;
+      #aion-speech-text,
+      .aion-chat-messages,
+      .aion-msg,
+      .aion-msg-text,
+      .aion-mem-drawer,
+      .aion-mem-item-text {
+        user-select: text !important;
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        cursor: text !important;
+      }
+      #aion-speech-text::selection,
+      .aion-msg::selection,
+      .aion-msg *::selection,
+      .aion-mem-item-text::selection {
+        background: rgba(0, 255, 200, 0.38) !important;
+        color: #ffffff !important;
       }
       #aion-minime-pill {
         position: fixed !important;
@@ -485,7 +590,7 @@
         position: fixed !important;
         right: 22px !important;
         bottom: 22px !important;
-        width: 375px !important;
+        width: 385px !important;
         max-width: calc(100vw - 32px) !important;
         background: rgba(7, 13, 24, 0.96) !important;
         border: 1.5px solid #00ffc8 !important;
@@ -529,14 +634,145 @@
         border: 1px solid rgba(0, 255, 200, 0.4) !important;
       }
       .aion-cfs-bar {
-        padding: 6px 12px !important;
+        padding: 5px 10px !important;
         background: rgba(0, 255, 200, 0.07) !important;
         border-bottom: 1px solid rgba(0, 255, 200, 0.18) !important;
         font-size: 11px !important;
         color: #9be8d8 !important;
         font-family: monospace !important;
         display: flex !important;
+        align-items: center !important;
         justify-content: space-between !important;
+        gap: 6px !important;
+        user-select: none !important;
+      }
+      .aion-cfs-pills {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+      }
+      .aion-cfs-pill {
+        background: rgba(0, 255, 200, 0.12) !important;
+        border: 1px solid rgba(0, 255, 200, 0.38) !important;
+        color: #b8fff0 !important;
+        border-radius: 6px !important;
+        padding: 2px 7px !important;
+        font-size: 10.5px !important;
+        font-family: monospace !important;
+        cursor: pointer !important;
+        transition: all 0.15s ease !important;
+      }
+      .aion-cfs-pill:hover,
+      .aion-cfs-pill.active {
+        background: rgba(0, 255, 200, 0.32) !important;
+        border-color: #00ffc8 !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 10px rgba(0, 255, 200, 0.35) !important;
+      }
+      .aion-mem-drawer {
+        display: none;
+        flex-direction: column !important;
+        max-height: 225px !important;
+        background: rgba(4, 11, 22, 0.98) !important;
+        border-bottom: 1.5px solid rgba(0, 255, 200, 0.4) !important;
+      }
+      .aion-mem-drawer.open {
+        display: flex !important;
+      }
+      .aion-mem-drawer-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        padding: 6px 10px !important;
+        background: rgba(0, 255, 200, 0.1) !important;
+        border-bottom: 1px solid rgba(0, 255, 200, 0.2) !important;
+        font-size: 11.5px !important;
+        font-weight: 700 !important;
+        color: #00ffc8 !important;
+        user-select: none !important;
+      }
+      .aion-mem-tabs {
+        display: inline-flex !important;
+        gap: 6px !important;
+      }
+      .aion-mem-tab-btn {
+        background: rgba(0, 255, 200, 0.1) !important;
+        border: 1px solid rgba(0, 255, 200, 0.3) !important;
+        color: #a6f0e0 !important;
+        border-radius: 6px !important;
+        padding: 2px 8px !important;
+        font-size: 11px !important;
+        cursor: pointer !important;
+      }
+      .aion-mem-tab-btn.active,
+      .aion-mem-tab-btn:hover {
+        background: #00ffc8 !important;
+        color: #04151f !important;
+        font-weight: 700 !important;
+      }
+      .aion-mem-list {
+        overflow-y: auto !important;
+        padding: 8px 10px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 6px !important;
+        max-height: 185px !important;
+      }
+      .aion-mem-item {
+        display: flex !important;
+        align-items: flex-start !important;
+        justify-content: space-between !important;
+        gap: 8px !important;
+        padding: 6px 8px !important;
+        border-radius: 8px !important;
+        background: rgba(0, 255, 200, 0.07) !important;
+        border: 1px solid rgba(0, 255, 200, 0.22) !important;
+        font-size: 11.5px !important;
+        line-height: 1.35 !important;
+      }
+      .aion-mem-item:hover {
+        border-color: rgba(0, 255, 200, 0.5) !important;
+        background: rgba(0, 255, 200, 0.12) !important;
+      }
+      .aion-mem-item-text {
+        flex: 1 !important;
+        color: #eafffb !important;
+        word-break: break-word !important;
+      }
+      .aion-mem-item-meta {
+        display: block !important;
+        font-size: 10px !important;
+        color: #79d8c6 !important;
+        margin-top: 2px !important;
+      }
+      .aion-mem-item-actions {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        flex-shrink: 0 !important;
+        user-select: none !important;
+      }
+      .aion-mem-act-btn {
+        background: rgba(0, 255, 200, 0.14) !important;
+        border: 1px solid rgba(0, 255, 200, 0.38) !important;
+        color: #eafffb !important;
+        border-radius: 5px !important;
+        padding: 2px 6px !important;
+        font-size: 10.5px !important;
+        cursor: pointer !important;
+      }
+      .aion-mem-act-btn:hover {
+        background: rgba(0, 255, 200, 0.35) !important;
+      }
+      .aion-mem-act-btn.delete {
+        background: rgba(255, 65, 105, 0.16) !important;
+        border-color: rgba(255, 65, 105, 0.48) !important;
+        color: #ff9bb0 !important;
+      }
+      .aion-mem-act-btn.delete:hover {
+        background: rgba(255, 65, 105, 0.85) !important;
+        border-color: #ff4169 !important;
+        color: #ffffff !important;
       }
       .aion-chat-messages {
         height: 245px !important;
@@ -548,11 +784,33 @@
         font-size: 13px !important;
       }
       .aion-msg {
-        padding: 8px 11px !important;
+        position: relative !important;
+        padding: 8px 28px 8px 11px !important;
         border-radius: 11px !important;
-        max-width: 88% !important;
+        max-width: 90% !important;
         line-height: 1.42 !important;
         word-wrap: break-word !important;
+      }
+      .aion-msg-copy {
+        position: absolute !important;
+        top: 5px !important;
+        right: 5px !important;
+        background: rgba(0, 255, 200, 0.12) !important;
+        border: 1px solid rgba(0, 255, 200, 0.3) !important;
+        color: #9be8d8 !important;
+        border-radius: 4px !important;
+        padding: 1px 4px !important;
+        font-size: 10px !important;
+        cursor: pointer !important;
+        opacity: 0.55 !important;
+        user-select: none !important;
+      }
+      .aion-msg:hover .aion-msg-copy {
+        opacity: 1 !important;
+      }
+      .aion-msg-copy:hover {
+        background: rgba(0, 255, 200, 0.35) !important;
+        color: #ffffff !important;
       }
       .aion-msg.aion {
         background: rgba(0, 255, 200, 0.12) !important;
@@ -641,13 +899,14 @@
     });
     mountRoot.appendChild(hitbox);
 
-    const speech = domEl("div", { id: "aion-minime-speech", title: "Drag me anywhere on the screen!" }, [
+    const speech = domEl("div", { id: "aion-minime-speech", title: "Drag the top bar to move, or highlight text & press Ctrl+C!" }, [
       domEl("div", { className: "aion-tag" }, [
         domEl("span", {}, [
           "✥ 🐾 AION ",
           domEl("span", { id: "aion-gen-badge", textContent: `GEN ${liveGeneration}` })
         ]),
         domEl("span", { className: "aion-mini-ctrls" }, [
+          domEl("button", { className: "aion-ctrl-btn", id: "aion-speech-copy-btn", title: "Copy Speech Text (or highlight & press Ctrl+C)", textContent: "📋" }),
           domEl("button", { className: "aion-ctrl-btn aion-dance-btn", title: "Dance & Copy Live Video Choreography!", textContent: "💃" }),
           domEl("button", { className: "aion-ctrl-btn aion-update-btn", title: "Update from GitHub & Sync Live Feeds", textContent: "🔄" }),
           domEl("button", { className: "aion-ctrl-btn aion-mute-btn", title: "Turn Sound On/Off", textContent: "🔊" }),
@@ -693,8 +952,9 @@
       ]),
       domEl("div", { className: "aion-cfs-bar", id: "aion-cfs-bar" }, [
         domEl("span", { textContent: "CFS1: 353 KB" }),
-        domEl("span", { textContent: `🧠 Memory: ${learnedFactsCount} Facts (Never Forgets)` })
+        domEl("span", { textContent: `🧠 Memory: ${learnedFactsCount} Facts` })
       ]),
+      domEl("div", { className: "aion-mem-drawer", id: "aion-mem-drawer" }),
       domEl("div", { className: "aion-chat-messages", id: "aion-chat-messages" }),
       domEl("div", { className: "aion-quick-actions" }, [
         domEl("button", {
@@ -1061,10 +1321,16 @@
       if (res.data.generation) {
         liveGeneration = Number(res.data.generation);
       }
-      if (res.data.learned_facts_count !== undefined) {
+      if (Array.isArray(res.data.learned_facts)) {
+        learnedFactsList = res.data.learned_facts;
+        learnedFactsCount = learnedFactsList.length;
+      } else if (res.data.learned_facts_count !== undefined) {
         learnedFactsCount = Number(res.data.learned_facts_count);
       }
       updateAllGenerationBadges();
+      if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
+        renderMemoryInspectorDrawer();
+      }
       const badge = document.getElementById("aion-bridge-mode");
       if (badge) {
         badge.textContent = res.data.bridge === "24/7 CLOUD + CFS1" ? "24/7 CLOUD" : "120B NEXUS";
@@ -1184,12 +1450,12 @@
           if (res.data.generation) liveGeneration = Number(res.data.generation);
           if (res.data.learned_facts_count !== undefined) learnedFactsCount = Number(res.data.learned_facts_count);
           updateAllGenerationBadges();
-          statusMsg.textContent = "✅ " + res.data.message;
+          setChatMessageText(statusMsg, "✅ " + res.data.message);
           speakEnglishWithLipSync(res.data.message, speechTextEl);
         } else {
           await syncLiveGeneration();
           const msg = `Synced with GitHub (Herakles5/Aion-MiniMe-WebBrowserExtension) at live Generation ${liveGeneration}!`;
-          statusMsg.textContent = "✅ " + msg;
+          setChatMessageText(statusMsg, "✅ " + msg);
           speakEnglishWithLipSync(msg, speechTextEl);
         }
       });
@@ -1202,14 +1468,270 @@
       });
     });
 
+    function setChatMessageText(msgDiv, text) {
+      if (!msgDiv) return;
+      const txtNode = msgDiv.querySelector(".aion-msg-text");
+      if (txtNode) {
+        txtNode.textContent = text;
+      } else {
+        msgDiv.textContent = text;
+      }
+    }
+
     function appendChatMessage(sender, text) {
       const div = document.createElement("div");
       div.className = "aion-msg " + sender;
-      div.textContent = text;
+      const txtSpan = document.createElement("div");
+      txtSpan.className = "aion-msg-text";
+      txtSpan.textContent = text;
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "aion-msg-copy";
+      copyBtn.title = "Copy message (or highlight text with mouse & press Ctrl+C)";
+      copyBtn.textContent = "📋";
+      copyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        copyTextToClipboard(txtSpan.textContent, copyBtn);
+      });
+      div.appendChild(txtSpan);
+      div.appendChild(copyBtn);
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       return div;
     }
+
+    const memDrawerEl = document.getElementById("aion-mem-drawer");
+
+    renderMemoryInspectorDrawer = function () {
+      if (!memDrawerEl) return;
+      if (!activeInspectorTab) {
+        memDrawerEl.classList.remove("open");
+        memDrawerEl.replaceChildren();
+        return;
+      }
+      memDrawerEl.classList.add("open");
+
+      const totalDances = getTotalDancesCount();
+      const header = document.createElement("div");
+      header.className = "aion-mem-drawer-header";
+
+      const tabsWrap = document.createElement("div");
+      tabsWrap.className = "aion-mem-tabs";
+
+      const tabFacts = document.createElement("button");
+      tabFacts.type = "button";
+      tabFacts.className = "aion-mem-tab-btn" + (activeInspectorTab === "facts" ? " active" : "");
+      tabFacts.textContent = `🧠 Facts (${learnedFactsList.length})`;
+      tabFacts.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activeInspectorTab = "facts";
+        updateAllGenerationBadges();
+        renderMemoryInspectorDrawer();
+      });
+
+      const tabDances = document.createElement("button");
+      tabDances.type = "button";
+      tabDances.className = "aion-mem-tab-btn" + (activeInspectorTab === "dances" ? " active" : "");
+      tabDances.textContent = `💃 Dances (${totalDances})`;
+      tabDances.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activeInspectorTab = "dances";
+        updateAllGenerationBadges();
+        renderMemoryInspectorDrawer();
+      });
+
+      tabsWrap.appendChild(tabFacts);
+      tabsWrap.appendChild(tabDances);
+
+      const closeDrawerBtn = document.createElement("button");
+      closeDrawerBtn.type = "button";
+      closeDrawerBtn.className = "aion-ctrl-btn danger";
+      closeDrawerBtn.title = "Close Memory / Dance List";
+      closeDrawerBtn.textContent = "✕";
+      closeDrawerBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        activeInspectorTab = null;
+        updateAllGenerationBadges();
+        renderMemoryInspectorDrawer();
+      });
+
+      header.appendChild(tabsWrap);
+      header.appendChild(closeDrawerBtn);
+
+      const listEl = document.createElement("div");
+      listEl.className = "aion-mem-list";
+
+      if (activeInspectorTab === "facts") {
+        if (learnedFactsList.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "aion-mem-item-text";
+          empty.style.padding = "6px 4px";
+          empty.textContent = "No stored facts in memory yet.";
+          listEl.appendChild(empty);
+        } else {
+          learnedFactsList.forEach((factText, idx) => {
+            const row = document.createElement("div");
+            row.className = "aion-mem-item";
+
+            const txt = document.createElement("div");
+            txt.className = "aion-mem-item-text";
+            txt.textContent = `#${idx + 1}: ${factText}`;
+
+            const acts = document.createElement("div");
+            acts.className = "aion-mem-item-actions";
+
+            const cBtn = document.createElement("button");
+            cBtn.type = "button";
+            cBtn.className = "aion-mem-act-btn";
+            cBtn.title = "Copy this fact";
+            cBtn.textContent = "📋";
+            cBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              copyTextToClipboard(factText, cBtn);
+            });
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "aion-mem-act-btn delete";
+            delBtn.title = "Delete this fact permanently";
+            delBtn.textContent = "🗑️";
+            delBtn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              learnedFactsList = learnedFactsList.filter((f, i) => i !== idx);
+              learnedFactsCount = learnedFactsList.length;
+              updateAllGenerationBadges();
+              renderMemoryInspectorDrawer();
+              const res = await bridgeRequest(
+                "/api/delete_memory",
+                "POST",
+                { type: "fact", value: factText, index: idx },
+                5000
+              );
+              if (res && res.ok && res.data && Array.isArray(res.data.learned_facts)) {
+                learnedFactsList = res.data.learned_facts;
+                learnedFactsCount = learnedFactsList.length;
+                updateAllGenerationBadges();
+                renderMemoryInspectorDrawer();
+              }
+            });
+
+            acts.appendChild(cBtn);
+            acts.appendChild(delBtn);
+            row.appendChild(txt);
+            row.appendChild(acts);
+            listEl.appendChild(row);
+          });
+        }
+      } else if (activeInspectorTab === "dances") {
+        const activeBuiltins = getActiveBuiltinChoreos();
+        const combinedDances = activeBuiltins
+          .map((d) => ({ ...d, builtin: true }))
+          .concat(learnedChoreoLibrary.map((d, i) => ({ ...d, builtin: false, learnedIndex: i })));
+
+        if (combinedDances.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "aion-mem-item-text";
+          empty.style.padding = "6px 4px";
+          empty.textContent = "No dances in repertoire.";
+          listEl.appendChild(empty);
+        } else {
+          combinedDances.forEach((dance, idx) => {
+            const row = document.createElement("div");
+            row.className = "aion-mem-item";
+
+            const txt = document.createElement("div");
+            txt.className = "aion-mem-item-text";
+            const titleNode = document.createElement("div");
+            titleNode.style.fontWeight = "600";
+            titleNode.textContent = `#${idx + 1}: ${dance.name || "Choreography"}`;
+            const metaNode = document.createElement("span");
+            metaNode.className = "aion-mem-item-meta";
+            metaNode.textContent = `${dance.bpm || 132} BPM • ${dance.builtin ? "Built-in Style" : (dance.source || "Learned Video Dance")}`;
+            txt.appendChild(titleNode);
+            txt.appendChild(metaNode);
+
+            const acts = document.createElement("div");
+            acts.className = "aion-mem-item-actions";
+
+            const playBtn = document.createElement("button");
+            playBtn.type = "button";
+            playBtn.className = "aion-mem-act-btn";
+            playBtn.title = "Dance this choreography right now!";
+            playBtn.textContent = "▶";
+            playBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (typeof launchSpecificChoreoCallback === "function") {
+                launchSpecificChoreoCallback(dance);
+              }
+            });
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "aion-mem-act-btn delete";
+            delBtn.title = "Delete this dance from repertoire";
+            delBtn.textContent = "🗑️";
+            delBtn.addEventListener("click", async (e) => {
+              e.stopPropagation();
+              if (dance.builtin) {
+                if (!disabledBuiltinDances.includes(dance.name)) {
+                  disabledBuiltinDances.push(dance.name);
+                }
+              } else {
+                learnedChoreoLibrary = learnedChoreoLibrary.filter((c) => c.name !== dance.name);
+              }
+              updateAllGenerationBadges();
+              renderMemoryInspectorDrawer();
+              const res = await bridgeRequest(
+                "/api/delete_memory",
+                "POST",
+                {
+                  type: "dance",
+                  name: dance.name,
+                  index: dance.learnedIndex !== undefined ? dance.learnedIndex : idx,
+                  builtin: Boolean(dance.builtin)
+                },
+                5000
+              );
+              if (res && res.ok && res.data) {
+                if (Array.isArray(res.data.learned_choreographies)) {
+                  learnedChoreoLibrary = res.data.learned_choreographies;
+                }
+                if (Array.isArray(res.data.disabled_builtin_dances)) {
+                  disabledBuiltinDances = res.data.disabled_builtin_dances;
+                }
+                updateAllGenerationBadges();
+                renderMemoryInspectorDrawer();
+              }
+            });
+
+            acts.appendChild(playBtn);
+            acts.appendChild(delBtn);
+            row.appendChild(txt);
+            row.appendChild(acts);
+            listEl.appendChild(row);
+          });
+        }
+
+        if (disabledBuiltinDances.length > 0) {
+          const restoreBtn = document.createElement("button");
+          restoreBtn.type = "button";
+          restoreBtn.className = "aion-mem-act-btn";
+          restoreBtn.style.alignSelf = "center";
+          restoreBtn.style.marginTop = "4px";
+          restoreBtn.textContent = `↺ Restore ${disabledBuiltinDances.length} Built-in Dance(s)`;
+          restoreBtn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            disabledBuiltinDances = [];
+            updateAllGenerationBadges();
+            renderMemoryInspectorDrawer();
+            await bridgeRequest("/api/delete_memory", "POST", { type: "restore_builtin_dances" }, 5000);
+          });
+          listEl.appendChild(restoreBtn);
+        }
+      }
+
+      memDrawerEl.replaceChildren(header, listEl);
+    };
 
     // 1. Load & unpack aion_minime_easter_egg.cfs (via privileged extension bridge first for YouTube/X CSP safety!)
     let cfsData = null;
@@ -1239,8 +1761,18 @@
       const memRes = await bridgeRequest("/api/memory?t=" + Date.now(), "GET", null, 3500);
       if (memRes && memRes.ok && memRes.data) {
         if (Array.isArray(memRes.data.learned_facts)) {
-          learnedFactsCount = memRes.data.learned_facts.length;
-          updateAllGenerationBadges();
+          learnedFactsList = memRes.data.learned_facts;
+          learnedFactsCount = learnedFactsList.length;
+        }
+        if (Array.isArray(memRes.data.learned_choreographies)) {
+          learnedChoreoLibrary = memRes.data.learned_choreographies;
+        }
+        if (Array.isArray(memRes.data.disabled_builtin_dances)) {
+          disabledBuiltinDances = memRes.data.disabled_builtin_dances;
+        }
+        updateAllGenerationBadges();
+        if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
+          renderMemoryInspectorDrawer();
         }
         if (Array.isArray(memRes.data.conversation_history) && memRes.data.conversation_history.length > 0) {
           const recentTurns = memRes.data.conversation_history.slice(-10);
@@ -1511,19 +2043,26 @@
         bridgeRequest("/api/learn_choreo", "POST", { choreo: activeChoreo }, 5000)
           .then((res) => {
             if (res && res.ok && res.data) {
-              if (res.data.learned_facts_count !== undefined) {
+              if (Array.isArray(res.data.learned_facts)) {
+                learnedFactsList = res.data.learned_facts;
+                learnedFactsCount = learnedFactsList.length;
+              } else if (res.data.learned_facts_count !== undefined) {
                 learnedFactsCount = Number(res.data.learned_facts_count);
               }
               if (Array.isArray(res.data.learned_choreographies)) {
                 learnedChoreoLibrary = res.data.learned_choreographies;
               }
               updateAllGenerationBadges();
+              if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
+                renderMemoryInspectorDrawer();
+              }
             }
           })
           .catch(() => {});
       } else {
         const lower = userMsg.toLowerCase();
-        const allRepertoire = BUILTIN_CHOREOGRAPHIES.concat(learnedChoreoLibrary);
+        const activeBuiltins = getActiveBuiltinChoreos();
+        const allRepertoire = activeBuiltins.concat(learnedChoreoLibrary);
         // Check if user requested a specific previously learned choreography or style by keyword
         const matchedLearned = learnedChoreoLibrary.find((c) =>
           lower && lower.length > 3 && c.name && c.name.toLowerCase().split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
@@ -1536,8 +2075,8 @@
           activeChoreo = BUILTIN_CHOREOGRAPHIES[2];
         } else if (lower.includes("meovv") || lower.includes("go hard")) {
           activeChoreo = BUILTIN_CHOREOGRAPHIES[0];
-        } else {
-          // Cycle through her entire cumulative repertoire (learned video dances + 3 built-in styles)
+        } else if (allRepertoire.length > 0) {
+          // Cycle through her entire cumulative repertoire (learned video dances + active built-in styles)
           activeChoreo = allRepertoire[choreoCycleIndex % allRepertoire.length];
           choreoCycleIndex = (choreoCycleIndex + 1) % allRepertoire.length;
         }
@@ -1547,7 +2086,7 @@
       danceTimer = 22.0;
       roamMode = 3;
       roamTimer = 22.0;
-      const totalDances = BUILTIN_CHOREOGRAPHIES.length + learnedChoreoLibrary.length;
+      const totalDances = getTotalDancesCount();
 
       if (learnedFromVideo) {
         return (
@@ -1562,6 +2101,18 @@
         `or open any video on YouTube/X and click 💃 to teach me a brand-new choreography!`
       );
     }
+
+    launchSpecificChoreoCallback = function (danceObj) {
+      if (!danceObj) return;
+      activeChoreo = danceObj;
+      isDancing = true;
+      danceTimer = 22.0;
+      roamMode = 3;
+      roamTimer = 22.0;
+      const msg = `💃 Dancing '${activeChoreo.name}' (${activeChoreo.bpm || 132} BPM)!`;
+      appendChatMessage("aion", msg);
+      speakEnglishWithLipSync(msg, speechTextEl);
+    };
 
     function pickDOMElementToPointAt() {
       const candidates = Array.from(
@@ -1636,6 +2187,15 @@
 
     const speechPinBtn = document.getElementById("aion-speech-pin-btn");
     const speechCollapseBtn = document.getElementById("aion-speech-collapse-btn");
+    const speechCopyBtn = document.getElementById("aion-speech-copy-btn");
+
+    if (speechCopyBtn) {
+      speechCopyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const sel = window.getSelection ? window.getSelection().toString().trim() : "";
+        copyTextToClipboard(sel || (speechTextEl ? speechTextEl.textContent : ""), speechCopyBtn);
+      });
+    }
 
     function updateSpeechPinBadge() {
       if (speechPinBtn) {
@@ -1671,7 +2231,7 @@
       });
     }
 
-    // 1. Make Speech Popup freely draggable anywhere on screen
+    // 1. Make Speech Popup freely draggable via its top tag bar (leaving #aion-speech-text 100% selectable!)
     let isDraggingSpeech = false;
     let speechDragMoved = false;
     let speechDragStartX = 0;
@@ -1687,7 +2247,7 @@
     }
 
     function startSpeechDrag(e) {
-      if (e.target && e.target.closest("button")) return;
+      if (e.target && (e.target.closest("button") || e.target.closest("#aion-speech-text"))) return;
       const pt = getEvtCoords(e);
       isDraggingSpeech = true;
       speechDragMoved = false;
@@ -1811,8 +2371,31 @@
       if (!catDragMoved) triggerGreetingAndOpenChat();
     });
     speechTextEl.addEventListener("click", () => {
-      if (!speechDragMoved) triggerGreetingAndOpenChat();
+      const sel = window.getSelection ? window.getSelection().toString().trim() : "";
+      if (sel.length > 0) return;
+      if (!speechDragMoved && !ui.chatbox.classList.contains("open") && speechTextEl.dataset.isDefaultGreeting === "1") {
+        triggerGreetingAndOpenChat();
+      }
     });
+
+    // Guarantee Ctrl+C / Cmd+C copies selected text inside Mini-Me Chatbox or Speech Bubble even on sites that intercept keys
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+          const selObj = window.getSelection ? window.getSelection() : null;
+          const selText = selObj ? selObj.toString() : "";
+          if (selText && selObj.anchorNode) {
+            const nodeEl = selObj.anchorNode.nodeType === 1 ? selObj.anchorNode : selObj.anchorNode.parentElement;
+            if (nodeEl && (ui.chatbox.contains(nodeEl) || ui.speech.contains(nodeEl))) {
+              copyTextToClipboard(selText, null);
+              e.stopPropagation();
+            }
+          }
+        }
+      },
+      true
+    );
 
     document.querySelectorAll(".aion-dance-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
@@ -1833,7 +2416,7 @@
       const thinkingEl = appendChatMessage("aion", "🐾 Aion is thinking...");
       const reply = await askAionBrain(q, cfsData, pickDOMElementToPointAt, triggerDanceAndLearnFromVideo);
       if (thinkingEl) {
-        thinkingEl.textContent = reply;
+        setChatMessageText(thinkingEl, reply);
       } else {
         appendChatMessage("aion", reply);
       }
