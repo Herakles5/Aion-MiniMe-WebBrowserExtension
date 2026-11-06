@@ -484,22 +484,52 @@
       #aion-minime-hitbox:hover {
         box-shadow: 0 0 24px rgba(0, 255, 200, 0.45) !important;
       }
+      #aion-minime-speech,
+      #aion-minime-speech *,
+      #aion-minime-chatbox,
+      #aion-minime-chatbox *,
+      #aion-minime-pill,
+      #aion-minime-pill * {
+        box-sizing: border-box !important;
+      }
+      #aion-minime-speech button,
+      #aion-minime-chatbox button,
+      #aion-minime-pill button {
+        width: auto !important;
+        height: auto !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        max-width: 100% !important;
+        max-height: none !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        backdrop-filter: none !important;
+        transform: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        flex-shrink: 0 !important;
+        white-space: nowrap !important;
+        font-weight: 600 !important;
+      }
       #aion-minime-speech {
         position: fixed !important;
-        max-width: 315px !important;
-        min-width: 245px !important;
-        padding: 9px 12px !important;
+        width: max-content !important;
+        max-width: min(325px, calc(100vw - 24px)) !important;
+        min-width: 235px !important;
+        padding: 8px 10px !important;
         background: rgba(6, 14, 26, 0.94) !important;
         border: 1.5px solid #00ffc8 !important;
         border-radius: 14px !important;
         color: #eafffb !important;
         font-family: 'Segoe UI', system-ui, monospace !important;
-        font-size: 12.5px !important;
+        font-size: 12px !important;
         line-height: 1.4 !important;
         box-shadow: 0 8px 28px rgba(0, 255, 200, 0.25) !important;
         pointer-events: auto !important;
         z-index: 2147483642 !important;
         transform: translate(-50%, -100%) !important;
+        overflow: hidden !important;
       }
       #aion-minime-speech.dragging {
         cursor: grabbing !important;
@@ -513,30 +543,40 @@
       }
       #aion-minime-speech .aion-tag {
         display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
         justify-content: space-between !important;
         font-size: 10px !important;
         font-weight: 700 !important;
         color: #00ffc8 !important;
-        letter-spacing: 0.6px !important;
+        letter-spacing: 0.4px !important;
         margin-bottom: 5px !important;
-        gap: 6px !important;
+        gap: 4px 6px !important;
         cursor: grab !important;
         user-select: none !important;
+        width: 100% !important;
       }
-      .aion-mini-ctrls {
+      #aion-minime-speech .aion-tag > span:first-child {
+        white-space: nowrap !important;
         display: inline-flex !important;
         align-items: center !important;
         gap: 4px !important;
+      }
+      .aion-mini-ctrls {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        gap: 3px !important;
+        max-width: 100% !important;
       }
       .aion-ctrl-btn {
         background: rgba(0, 255, 200, 0.14) !important;
         border: 1px solid rgba(0, 255, 200, 0.4) !important;
         color: #eafffb !important;
-        border-radius: 5px !important;
-        padding: 1px 6px !important;
-        font-size: 11px !important;
-        line-height: 1.3 !important;
+        border-radius: 4px !important;
+        padding: 2px 5px !important;
+        font-size: 10px !important;
+        line-height: 1.15 !important;
         cursor: pointer !important;
         font-family: system-ui, sans-serif !important;
         user-select: none !important;
@@ -574,14 +614,15 @@
         background: rgba(6, 15, 28, 0.95) !important;
         border: 1.5px solid #00ffc8 !important;
         border-radius: 999px !important;
-        padding: 7px 13px !important;
+        padding: 6px 11px !important;
         color: #eafffb !important;
         font-family: 'Segoe UI', system-ui, sans-serif !important;
-        font-size: 12px !important;
+        font-size: 11.5px !important;
         font-weight: 600 !important;
         display: none;
+        flex-wrap: wrap !important;
         align-items: center !important;
-        gap: 8px !important;
+        gap: 6px !important;
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.65), 0 0 18px rgba(0, 255, 200, 0.25) !important;
         z-index: 2147483646 !important;
         pointer-events: auto !important;
@@ -590,8 +631,8 @@
         position: fixed !important;
         right: 22px !important;
         bottom: 22px !important;
-        width: 385px !important;
-        max-width: calc(100vw - 32px) !important;
+        width: 375px !important;
+        max-width: calc(100vw - 24px) !important;
         background: rgba(7, 13, 24, 0.96) !important;
         border: 1.5px solid #00ffc8 !important;
         border-radius: 16px !important;
@@ -609,55 +650,65 @@
       }
       .aion-chat-header {
         background: linear-gradient(90deg, #06283d, #0a192f) !important;
-        padding: 10px 13px !important;
+        padding: 8px 10px !important;
         border-bottom: 1px solid rgba(0, 255, 200, 0.3) !important;
         display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
         justify-content: space-between !important;
+        gap: 5px 8px !important;
         cursor: grab !important;
         user-select: none !important;
+        width: 100% !important;
       }
       .aion-chat-title {
         font-weight: 700 !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
         color: #00ffc8 !important;
         display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
-        gap: 6px !important;
+        gap: 4px !important;
+        white-space: nowrap !important;
       }
       .aion-chat-badge {
-        font-size: 10px !important;
-        padding: 2px 6px !important;
-        border-radius: 6px !important;
+        font-size: 9.5px !important;
+        padding: 1px 5px !important;
+        border-radius: 5px !important;
         background: rgba(0, 255, 200, 0.16) !important;
         color: #72ffdf !important;
         border: 1px solid rgba(0, 255, 200, 0.4) !important;
+        white-space: nowrap !important;
       }
       .aion-cfs-bar {
         padding: 5px 10px !important;
         background: rgba(0, 255, 200, 0.07) !important;
         border-bottom: 1px solid rgba(0, 255, 200, 0.18) !important;
-        font-size: 11px !important;
+        font-size: 10.5px !important;
         color: #9be8d8 !important;
         font-family: monospace !important;
         display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
         justify-content: space-between !important;
-        gap: 6px !important;
+        gap: 4px 6px !important;
         user-select: none !important;
+        width: 100% !important;
       }
       .aion-cfs-pills {
-        display: inline-flex !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
-        gap: 5px !important;
+        gap: 4px !important;
       }
       .aion-cfs-pill {
         background: rgba(0, 255, 200, 0.12) !important;
         border: 1px solid rgba(0, 255, 200, 0.38) !important;
         color: #b8fff0 !important;
-        border-radius: 6px !important;
-        padding: 2px 7px !important;
-        font-size: 10.5px !important;
+        border-radius: 5px !important;
+        padding: 2px 6px !important;
+        font-size: 10px !important;
+        line-height: 1.2 !important;
         font-family: monospace !important;
         cursor: pointer !important;
         transition: all 0.15s ease !important;
@@ -675,33 +726,38 @@
         max-height: 225px !important;
         background: rgba(4, 11, 22, 0.98) !important;
         border-bottom: 1.5px solid rgba(0, 255, 200, 0.4) !important;
+        width: 100% !important;
       }
       .aion-mem-drawer.open {
         display: flex !important;
       }
       .aion-mem-drawer-header {
         display: flex !important;
+        flex-wrap: wrap !important;
         align-items: center !important;
         justify-content: space-between !important;
+        gap: 4px 6px !important;
         padding: 6px 10px !important;
         background: rgba(0, 255, 200, 0.1) !important;
         border-bottom: 1px solid rgba(0, 255, 200, 0.2) !important;
-        font-size: 11.5px !important;
+        font-size: 11px !important;
         font-weight: 700 !important;
         color: #00ffc8 !important;
         user-select: none !important;
       }
       .aion-mem-tabs {
-        display: inline-flex !important;
-        gap: 6px !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 4px !important;
       }
       .aion-mem-tab-btn {
         background: rgba(0, 255, 200, 0.1) !important;
         border: 1px solid rgba(0, 255, 200, 0.3) !important;
         color: #a6f0e0 !important;
-        border-radius: 6px !important;
-        padding: 2px 8px !important;
-        font-size: 11px !important;
+        border-radius: 5px !important;
+        padding: 2px 7px !important;
+        font-size: 10px !important;
+        line-height: 1.2 !important;
         cursor: pointer !important;
       }
       .aion-mem-tab-btn.active,
@@ -722,12 +778,12 @@
         display: flex !important;
         align-items: flex-start !important;
         justify-content: space-between !important;
-        gap: 8px !important;
+        gap: 6px !important;
         padding: 6px 8px !important;
         border-radius: 8px !important;
         background: rgba(0, 255, 200, 0.07) !important;
         border: 1px solid rgba(0, 255, 200, 0.22) !important;
-        font-size: 11.5px !important;
+        font-size: 11px !important;
         line-height: 1.35 !important;
       }
       .aion-mem-item:hover {
@@ -741,7 +797,7 @@
       }
       .aion-mem-item-meta {
         display: block !important;
-        font-size: 10px !important;
+        font-size: 9.5px !important;
         color: #79d8c6 !important;
         margin-top: 2px !important;
       }
@@ -756,9 +812,10 @@
         background: rgba(0, 255, 200, 0.14) !important;
         border: 1px solid rgba(0, 255, 200, 0.38) !important;
         color: #eafffb !important;
-        border-radius: 5px !important;
-        padding: 2px 6px !important;
-        font-size: 10.5px !important;
+        border-radius: 4px !important;
+        padding: 2px 5px !important;
+        font-size: 10px !important;
+        line-height: 1.15 !important;
         cursor: pointer !important;
       }
       .aion-mem-act-btn:hover {
@@ -775,32 +832,33 @@
         color: #ffffff !important;
       }
       .aion-chat-messages {
-        height: 245px !important;
+        height: 235px !important;
         overflow-y: auto !important;
-        padding: 12px !important;
+        padding: 10px !important;
         display: flex !important;
         flex-direction: column !important;
-        gap: 9px !important;
-        font-size: 13px !important;
+        gap: 8px !important;
+        font-size: 12.5px !important;
       }
       .aion-msg {
         position: relative !important;
-        padding: 8px 28px 8px 11px !important;
+        padding: 8px 26px 8px 10px !important;
         border-radius: 11px !important;
-        max-width: 90% !important;
+        max-width: 92% !important;
         line-height: 1.42 !important;
         word-wrap: break-word !important;
       }
       .aion-msg-copy {
         position: absolute !important;
-        top: 5px !important;
-        right: 5px !important;
+        top: 4px !important;
+        right: 4px !important;
         background: rgba(0, 255, 200, 0.12) !important;
         border: 1px solid rgba(0, 255, 200, 0.3) !important;
         color: #9be8d8 !important;
         border-radius: 4px !important;
         padding: 1px 4px !important;
-        font-size: 10px !important;
+        font-size: 9.5px !important;
+        line-height: 1.1 !important;
         cursor: pointer !important;
         opacity: 0.55 !important;
         user-select: none !important;
@@ -826,18 +884,20 @@
       }
       .aion-quick-actions {
         display: flex !important;
-        gap: 6px !important;
-        padding: 6px 12px !important;
         flex-wrap: wrap !important;
+        gap: 4px !important;
+        padding: 6px 10px !important;
         border-top: 1px solid rgba(255,255,255,0.07) !important;
+        width: 100% !important;
       }
       .aion-quick-btn {
         background: rgba(0, 255, 200, 0.1) !important;
         border: 1px solid rgba(0, 255, 200, 0.35) !important;
         color: #00ffc8 !important;
-        border-radius: 8px !important;
-        padding: 4px 8px !important;
-        font-size: 11px !important;
+        border-radius: 6px !important;
+        padding: 3px 7px !important;
+        font-size: 10px !important;
+        line-height: 1.2 !important;
         cursor: pointer !important;
       }
       .aion-quick-btn:hover {
@@ -845,19 +905,24 @@
       }
       .aion-chat-input-row {
         display: flex !important;
-        padding: 10px 12px !important;
-        gap: 8px !important;
+        align-items: center !important;
+        padding: 8px 10px !important;
+        gap: 6px !important;
         border-top: 1px solid rgba(0, 255, 200, 0.22) !important;
         background: rgba(4, 9, 18, 0.95) !important;
+        width: 100% !important;
       }
       .aion-chat-input {
         flex: 1 !important;
+        min-width: 0 !important;
+        width: auto !important;
+        height: auto !important;
         background: rgba(255,255,255,0.07) !important;
         border: 1px solid rgba(0, 255, 200, 0.35) !important;
-        border-radius: 9px !important;
-        padding: 7px 10px !important;
+        border-radius: 8px !important;
+        padding: 6px 9px !important;
         color: #fff !important;
-        font-size: 13px !important;
+        font-size: 12.5px !important;
         outline: none !important;
       }
       .aion-chat-send {
@@ -865,10 +930,11 @@
         color: #04151f !important;
         font-weight: 700 !important;
         border: none !important;
-        border-radius: 9px !important;
-        padding: 7px 13px !important;
+        border-radius: 8px !important;
+        padding: 6px 11px !important;
         cursor: pointer !important;
-        font-size: 13px !important;
+        font-size: 12px !important;
+        line-height: 1.2 !important;
       }
       @media (max-width: 640px) {
         #aion-minime-chatbox {
