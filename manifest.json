@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AION Everywhere — Mini-Me CFS1 AI Companion",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "description": "Peaceful 3D Mini-Me AION (Model 13 Tuxedo Cat) packed in a 353 KB CosmOS Crystal File System (CFS1) capsule. Roams every webpage on Desktop & Mobile, dances upright on 2 legs, and chats with 120B AI intelligence & English neural voice 24/7!",
   "browser_specific_settings": {
     "gecko": {
@@ -14,7 +14,12 @@
       }
     },
     "gecko_android": {
-      "strict_min_version": "113.0"
+      "strict_min_version": "113.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   },
   "permissions": [
