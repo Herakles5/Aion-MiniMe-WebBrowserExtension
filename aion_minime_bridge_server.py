@@ -25,6 +25,12 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
+try:
+    import pose_rig_scanner
+except Exception as _prs_err:
+    print(f"[PoseRigScanner Warning] {_prs_err}")
+    pose_rig_scanner = None
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AI_DESKTOP_DIR = "/root/coding/AI_Desktop"
 PORT = 8788
@@ -587,6 +593,33 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_bytes)
             return
+        if self.path.startswith("/api/choreos"):
+            mem = load_persistent_minime_memory()
+            resp_bytes = json.dumps({
+                "status": "ok",
+                "choreographies": mem.get("learned_choreographies", [])
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+        if self.path.startswith("/api/choreo_track"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            track_id = (qs.get("id") or [""])[0]
+            track = pose_rig_scanner.load_track_from_disk(track_id) if (pose_rig_scanner and track_id) else None
+            if track:
+                resp_bytes = json.dumps({"status": "ok", "track": track}).encode("utf-8")
+                self.send_response(200)
+            else:
+                resp_bytes = json.dumps({"status": "not_found", "track": None}).encode("utf-8")
+                self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
         if self.path.startswith("/api/live_feeds"):
             feeds = refresh_live_internet_feeds(force=True)
             resp_bytes = json.dumps(feeds).encode("utf-8")
@@ -633,24 +666,215 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
             self.wfile.write(resp_bytes)
             return
 
-        if self.path.startswith("/api/learn_choreo"):
-            choreo = body.get("choreo") or {}
+        if self.path.startswith("/api/pose_scan_frame"):
+            if pose_rig_scanner is None:
+                resp_bytes = json.dumps({"status": "error", "error": "pose_rig_scanner unavailable"}).encode("utf-8")
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_bytes)))
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+                return
+            try:
+                scan_res = pose_rig_scanner.scan_video_frame_base64(
+                    image_b64=str(body.get("image") or ""),
+                    session_id=str(body.get("session_id") or "default"),
+                    video_time=float(body.get("video_time") or 0.0),
+                    title=str(body.get("title") or ""),
+                    source=str(body.get("source") or ""),
+                    reset_session=bool(body.get("reset", False)),
+                )
+                resp_bytes = json.dumps(scan_res).encode("utf-8")
+                self.send_response(200)
+            except Exception as e:
+                resp_bytes = json.dumps({"status": "error", "error": str(e)}).encode("utf-8")
+                self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+
+        if self.path.startswith("/api/save_choreo_track"):
+            if pose_rig_scanner is None:
+                resp_bytes = json.dumps({"status": "error", "error": "pose_rig_scanner unavailable"}).encode("utf-8")
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_bytes)))
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+                return
+
+            session_id = str(body.get("session_id") or "default")
+            raw_name = str(body.get("name") or "Live Video Dance")
+            raw_source = str(body.get("source") or "webpage video")
+            clean_source = re.sub(r'^"\(\d+\)\s*', '"', raw_source)
+
+            def _clean_mocap_title(r_name: str, r_src: str = "") -> str:
+                m = re.match(r'^"(.+?)"\s*\([^)]+\)\s*$', (r_src or "").strip())
+                cand = m.group(1) if m else (r_name or r_src or "Live Video Dance")
+                cand = re.sub(r'^Live Video Choreo:\s*', '', cand, flags=re.IGNORECASE)
+                cand = re.sub(r'^\(\d+\)\s*', '', cand).strip()
+                cand = re.sub(r'\s*-\s*YouTube\s*$', '', cand, flags=re.IGNORECASE)
+                cand = re.sub(r'\s*/\s*X\s*$', '', cand, flags=re.IGNORECASE)
+                cand = re.sub(r'\s*\|\s*KBS WORLD.*$', '', cand, flags=re.IGNORECASE)
+                cand = re.sub(r'\s+', ' ', cand).strip(' -|"\'')
+                if not cand or cand.lower() in ("home", "explore", "notifications"):
+                    cand = re.sub(r'^\(\d+\)\s*', '', (r_name or "Live Video Dance")).strip()
+                if len(cand) > 56:
+                    cand = cand[:56].rstrip()
+                return f"Live Video Choreo: {cand}" if not cand.startswith("MEOVV Go Hard Live") else cand
+
+            def _mocap_key(title: str) -> str:
+                t = re.sub(r'^Live Video Choreo:\s*', '', title or "", flags=re.IGNORECASE)
+                t = re.sub(r'^\(\d+\)\s*', '', t)
+                return re.sub(r'[^a-z0-9\uac00-\ud7a3]+', '', t.lower())[:28]
+
+            c_name = _clean_mocap_title(raw_name, clean_source)
+            summary = pose_rig_scanner.save_session_track_to_disk(
+                session_id=session_id,
+                custom_name=c_name,
+                custom_source=clean_source,
+            )
+            if not summary:
+                resp_bytes = json.dumps({"status": "empty", "message": "No frames recorded yet"}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_bytes)))
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+                return
+
             mem = load_persistent_minime_memory()
-            choreos = mem.get("learned_choreographies", [])
-            c_name = choreo.get("name", "Live Video Dance")
-            # Cumulative learning: update if exact same name, otherwise append permanently without forgetting old ones
-            existing_idx = next((i for i, c in enumerate(choreos) if c.get("name") == c_name), -1)
+            choreos = list(mem.get("learned_choreographies", []))
+            target_key = _mocap_key(c_name)
+            choreo_entry = {
+                "name": c_name,
+                "bpm": summary["bpm"],
+                "hipSway": summary["hipSway"],
+                "spineWave": summary["spineWave"],
+                "armWave": summary["armWave"],
+                "legBounce": summary["legBounce"],
+                "spinRate": 1.15,
+                "source": clean_source,
+                "mocap_1to1": True,
+                "track_id": summary["track_id"],
+                "dancer_count": summary["dancer_count"],
+                "shadow_clones": summary["shadow_clones"],
+                "duration_sec": summary["duration_sec"],
+                "frame_count": summary["frame_count"],
+            }
+
+            existing_idx = next(
+                (i for i, c in enumerate(choreos) if _mocap_key(c.get("name", "")) == target_key and target_key),
+                -1
+            )
+            if existing_idx >= 0:
+                prev = choreos[existing_idx]
+                # Keep previous track only if new checkpoint is strictly shorter on same song unless explicitly overwriting
+                choreos[existing_idx] = choreo_entry
+            else:
+                choreos.append(choreo_entry)
+            mem["learned_choreographies"] = choreos
+
+            fact_str = (
+                f"Learned 3D Video Dance Choreography '{c_name}' "
+                f"(1:1 Mocap Rig, {summary['duration_sec']}s, {summary['dancer_count']} Dancers / "
+                f"{summary['shadow_clones']} Shadow Clones, {summary['frame_count']} keyframes at {summary['bpm']} BPM) "
+                f"from {clean_source}."
+            )
+            facts = list(mem.get("learned_facts", []))
+            updated_fact = False
+            for fi, f_item in enumerate(facts):
+                if f_item.startswith("Learned 3D Video Dance Choreography '"):
+                    m_fn = re.search(r"Learned 3D Video Dance Choreography '([^']+)'", f_item)
+                    if m_fn and _mocap_key(m_fn.group(1)) == target_key and target_key:
+                        facts[fi] = fact_str
+                        updated_fact = True
+                        break
+            if not updated_fact and fact_str not in facts:
+                facts.append(fact_str)
+            mem["learned_facts"] = facts
+            save_persistent_minime_memory(mem)
+
+            resp_bytes = json.dumps({
+                "status": "ok",
+                "choreo": choreo_entry,
+                "learned_facts": mem["learned_facts"],
+                "learned_facts_count": len(mem["learned_facts"]),
+                "learned_choreographies": mem["learned_choreographies"],
+                "learned_choreos_count": len(mem["learned_choreographies"]),
+                "disabled_builtin_dances": mem.get("disabled_builtin_dances", []),
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.end_headers()
+            self.wfile.write(resp_bytes)
+            return
+
+        if self.path.startswith("/api/learn_choreo"):
+            choreo = dict(body.get("choreo") or {})
+            mem = load_persistent_minime_memory()
+            choreos = list(mem.get("learned_choreographies", []))
+
+            def _clean_choreo_title(raw_name: str, raw_source: str = "") -> str:
+                # Prefer full quoted source title when raw_name was truncated at 36 chars
+                m = re.match(r'^"(.+?)"\s*\([^)]+\)\s*$', (raw_source or "").strip())
+                candidate = m.group(1) if m else (raw_name or raw_source or "Live Video Dance")
+                candidate = re.sub(r'^Live Video Choreo:\s*', '', candidate, flags=re.IGNORECASE)
+                candidate = re.sub(r'^\(\d+\)\s*', '', candidate).strip()
+                candidate = re.sub(r'\s*-\s*YouTube\s*$', '', candidate, flags=re.IGNORECASE)
+                candidate = re.sub(r'\s*/\s*X\s*$', '', candidate, flags=re.IGNORECASE)
+                candidate = re.sub(r'\s*\|\s*KBS WORLD.*$', '', candidate, flags=re.IGNORECASE)
+                candidate = re.sub(r'\s+', ' ', candidate).strip(' -|"\'')
+                if not candidate or candidate.lower() in ("home", "explore", "notifications"):
+                    candidate = re.sub(r'^\(\d+\)\s*', '', (raw_name or "Live Video Dance")).strip()
+                if len(candidate) > 56:
+                    candidate = candidate[:56].rstrip()
+                return f"Live Video Choreo: {candidate}" if not candidate.startswith("MEOVV Go Hard Live") else candidate
+
+            def _choreo_key(title: str) -> str:
+                t = re.sub(r'^Live Video Choreo:\s*', '', title or "", flags=re.IGNORECASE)
+                t = re.sub(r'^\(\d+\)\s*', '', t)
+                return re.sub(r'[^a-z0-9\uac00-\ud7a3]+', '', t.lower())[:28]
+
+            raw_source = str(choreo.get("source", "webpage video"))
+            clean_source = re.sub(r'^"\(\d+\)\s*', '"', raw_source)
+            c_name = _clean_choreo_title(str(choreo.get("name", "Live Video Dance")), clean_source)
+            choreo["name"] = c_name
+            choreo["source"] = clean_source
+            target_key = _choreo_key(c_name)
+
+            # Update matching choreography in-place (ignoring unread notification badge prefixes)
+            existing_idx = next(
+                (i for i, c in enumerate(choreos) if _choreo_key(c.get("name", "")) == target_key and target_key),
+                -1
+            )
             if existing_idx >= 0:
                 choreos[existing_idx] = choreo
             else:
                 choreos.append(choreo)
             mem["learned_choreographies"] = choreos
+
             c_bpm = choreo.get("bpm", 128)
-            fact_str = f"Learned 3D Video Dance Choreography '{c_name}' ({c_bpm} BPM, Hip-Sway={choreo.get('hipSway', 1.0)}, Arm-Wave={choreo.get('armWave', 1.0)}) from {choreo.get('source', 'webpage video')}."
-            facts = mem.get("learned_facts", [])
-            if fact_str not in facts:
+            fact_str = (
+                f"Learned 3D Video Dance Choreography '{c_name}' "
+                f"({c_bpm} BPM, Hip-Sway={choreo.get('hipSway', 1.0)}, Arm-Wave={choreo.get('armWave', 1.0)}) "
+                f"from {clean_source}."
+            )
+            facts = list(mem.get("learned_facts", []))
+            updated_fact = False
+            for fi, f_item in enumerate(facts):
+                if f_item.startswith("Learned 3D Video Dance Choreography '"):
+                    m_fn = re.search(r"Learned 3D Video Dance Choreography '([^']+)'", f_item)
+                    if m_fn and _choreo_key(m_fn.group(1)) == target_key and target_key:
+                        facts[fi] = fact_str
+                        updated_fact = True
+                        break
+            if not updated_fact and fact_str not in facts:
                 facts.append(fact_str)
-                mem["learned_facts"] = facts
+            mem["learned_facts"] = facts
             save_persistent_minime_memory(mem)
             resp_bytes = json.dumps({
                 "status": "ok",
@@ -693,10 +917,25 @@ class AionMiniMeHandler(SimpleHTTPRequestHandler):
                         disabled_builtins.append(d_name)
                     mem["disabled_builtin_dances"] = disabled_builtins
                 else:
+                    removed_items = []
                     if isinstance(d_name, str) and d_name:
+                        removed_items = [c for c in choreos if c.get("name") == d_name]
                         choreos = [c for c in choreos if c.get("name") != d_name]
                     elif isinstance(idx, int) and 0 <= idx < len(choreos):
-                        choreos.pop(idx)
+                        removed_items = [choreos.pop(idx)]
+                    for rc in removed_items:
+                        rc_name = rc.get("name", "")
+                        if rc_name:
+                            facts = [f for f in facts if f"'{rc_name}'" not in f]
+                        tid = rc.get("track_id")
+                        if tid and pose_rig_scanner:
+                            tf = os.path.join(pose_rig_scanner.CHOREO_TRACKS_DIR, f"{tid}.json")
+                            if os.path.exists(tf):
+                                try:
+                                    os.remove(tf)
+                                except Exception:
+                                    pass
+                    mem["learned_facts"] = facts
                     mem["learned_choreographies"] = choreos
 
             elif item_type == "restore_builtin_dances":

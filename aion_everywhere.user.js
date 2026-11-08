@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AION Everywhere — 3D Mini-Me Cat & CosmOS CFS1 AI (Desktop & Mobile)
 // @namespace    https://github.com/Herakles5/Aion-MiniMe-WebBrowserExtension
-// @version      1.6.4
+// @version      1.8.0
 // @description  Peaceful 3D Mini-Me AION (Model 13 Tuxedo Cat) packed in a 353 KB CosmOS Crystal File System (CFS1) capsule. Roams every webpage on Desktop & Smartphone, dances upright on 2 legs, and chats with 120B AI intelligence & English neural voice 24/7!
 // @author       Tobias (Herakles5) & Argon (AION NEXUS / CosmOS)
 // @match        *://*/*

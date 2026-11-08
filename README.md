@@ -28,6 +28,11 @@
    - **Mode 1 — Live AION Nexus Bridge**: Connects to `aion_minime_bridge_server.py` (`http://127.0.0.1:8788/api/aion_chat` or your custom tunnel URL) for live local Ollama / AION Evolution Engine responses.
    - **Mode 2 — 24/7 Cloud & Offline CFS1 Fallback**: Works out-of-the-box for anyone on the Internet with zero backend setup required!
 
+5. **1:1 Multi-Dancer Video Motion-Capture Rigging, Shadow-Cat Clones & Full-Song Choreography Recorder (`v1.8.0`)**
+   - Click `💃` on any dance video (YouTube, X/Twitter, etc.): Mini-Me AION continuously scans downscaled video frames across the **entire duration of the song (3+ minutes)**, attaches live 17-joint skeletal rigs (`★ AION 1:1`, `CLONE #1..#5`) directly onto the dancers on the `<video>`, and maps their 3D limb vectors + 180°/360° spins 1:1 onto her 52-bone bipedal rig.
+   - Whenever multiple dancers appear on stage (`N > 1`), she spawns `N - 1` holographic **Shadow-Cat Clones** (*Schatten-Katzen-Tänzer*) in matching stage formation so every dancer has a dedicated cat avatar!
+   - Records and persists the full multi-dancer keyframe timeline (`12 Hz`) to disk and replays the entire 3+ minute choreography with all Shadow-Cat Clones anytime from `💃 Dances`.
+
 ---
 
 ## 🚀 Quick Start: Install in Your Browser (30 Seconds)

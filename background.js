@@ -158,11 +158,36 @@ async function handleBridgeFetch(msg) {
   return { ok: false, status: 503, data: null };
 }
 
+// Privileged Tab Screenshot Fallback for Cross-Origin / DRM-Free Video Mocap
+async function handleCaptureVisibleTab() {
+  try {
+    if (typeof browser !== "undefined" && browser.tabs && browser.tabs.captureVisibleTab) {
+      const dataUrl = await browser.tabs.captureVisibleTab(null, { format: "jpeg", quality: 64 });
+      return { ok: true, status: 200, dataUrl };
+    }
+    if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.captureVisibleTab) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 64 }, (url) => {
+          if (chrome.runtime.lastError || !url) reject(chrome.runtime.lastError || new Error("capture failed"));
+          else resolve(url);
+        });
+      });
+      return { ok: true, status: 200, dataUrl };
+    }
+  } catch (err) {
+    return { ok: false, status: 500, error: String(err) };
+  }
+  return { ok: false, status: 501, error: "captureVisibleTab unavailable" };
+}
+
 // Firefox WebExtensions use Promise return on `browser.runtime.onMessage`; Chrome uses `sendResponse` callback
 if (typeof browser !== "undefined" && browser.runtime && browser.runtime.onMessage) {
   browser.runtime.onMessage.addListener((message) => {
     if (message && message.type === "AION_BRIDGE_FETCH") {
       return handleBridgeFetch(message);
+    }
+    if (message && message.type === "AION_CAPTURE_VISIBLE_TAB") {
+      return handleCaptureVisibleTab();
     }
     return undefined;
   });
@@ -170,6 +195,12 @@ if (typeof browser !== "undefined" && browser.runtime && browser.runtime.onMessa
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === "AION_BRIDGE_FETCH") {
       handleBridgeFetch(message)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, status: 500, error: String(err) }));
+      return true;
+    }
+    if (message && message.type === "AION_CAPTURE_VISIBLE_TAB") {
+      handleCaptureVisibleTab()
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, status: 500, error: String(err) }));
       return true;

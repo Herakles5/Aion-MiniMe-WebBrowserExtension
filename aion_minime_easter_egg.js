@@ -936,6 +936,57 @@
         font-size: 12px !important;
         line-height: 1.2 !important;
       }
+      #aion-mocap-hud-canvas {
+        position: fixed !important;
+        pointer-events: none !important;
+        z-index: 2147483638 !important;
+        display: none;
+        border-radius: 8px !important;
+        box-shadow: inset 0 0 18px rgba(0, 255, 200, 0.35) !important;
+      }
+      #aion-mocap-bar {
+        position: fixed !important;
+        top: 14px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        background: rgba(6, 12, 26, 0.92) !important;
+        border: 1.5px solid #ff2bd6 !important;
+        border-radius: 999px !important;
+        padding: 5px 12px !important;
+        color: #fff6ff !important;
+        font-family: 'Segoe UI', system-ui, monospace !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        display: none;
+        align-items: center !important;
+        gap: 8px !important;
+        box-shadow: 0 8px 28px rgba(255, 43, 214, 0.35), 0 0 14px rgba(0, 255, 200, 0.25) !important;
+        z-index: 2147483644 !important;
+        pointer-events: auto !important;
+        user-select: none !important;
+      }
+      #aion-mocap-bar.active {
+        display: inline-flex !important;
+      }
+      #aion-mocap-bar button {
+        background: rgba(255, 43, 214, 0.2) !important;
+        border: 1px solid rgba(255, 43, 214, 0.6) !important;
+        color: #ffffff !important;
+        border-radius: 999px !important;
+        padding: 2px 8px !important;
+        font-size: 10.5px !important;
+        font-weight: 700 !important;
+        cursor: pointer !important;
+      }
+      #aion-mocap-bar button:hover {
+        background: rgba(255, 43, 214, 0.55) !important;
+      }
+      .aion-ctrl-btn.recording {
+        background: rgba(255, 43, 214, 0.55) !important;
+        border-color: #ff2bd6 !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 10px rgba(255, 43, 214, 0.65) !important;
+      }
       @media (max-width: 640px) {
         #aion-minime-chatbox {
           width: calc(100vw - 20px) !important;
@@ -955,6 +1006,15 @@
     document.head.appendChild(style);
 
     const mountRoot = document.body || document.documentElement;
+
+    const mocapHudCanvas = domEl("canvas", { id: "aion-mocap-hud-canvas" });
+    mountRoot.appendChild(mocapHudCanvas);
+
+    const mocapBarStatus = domEl("span", { id: "aion-mocap-bar-status", textContent: "🔴 1:1 MOCAP READY" });
+    const mocapBarEyeBtn = domEl("button", { type: "button", id: "aion-mocap-eye-btn", title: "Show / Hide Live Pose Rig Overlay on Video", textContent: "👁 Rigs ON" });
+    const mocapBarStopBtn = domEl("button", { type: "button", id: "aion-mocap-stop-btn", title: "Save Full Choreography & Stop", textContent: "⏹ Save & Stop" });
+    const mocapBar = domEl("div", { id: "aion-mocap-bar" }, [mocapBarStatus, mocapBarEyeBtn, mocapBarStopBtn]);
+    mountRoot.appendChild(mocapBar);
 
     const canvas = domEl("canvas", { id: "aion-minime-canvas" });
     mountRoot.appendChild(canvas);
@@ -1056,7 +1116,7 @@
     ]);
     mountRoot.appendChild(chatbox);
 
-    return { canvas, hitbox, speech, pill, chatbox };
+    return { canvas, hitbox, speech, pill, chatbox, mocapHudCanvas, mocapBar, mocapBarStatus, mocapBarEyeBtn, mocapBarStopBtn };
   }
 
   // ==========================================================================
@@ -1432,10 +1492,13 @@
       });
     }
 
+    let cleanupMocapOnHide = null;
+
     function setMinimizedState(min) {
       isMinimized = min;
       if (min) {
         stopAllSpeechAudio();
+        if (typeof cleanupMocapOnHide === "function") cleanupMocapOnHide(true);
         ui.canvas.style.display = "none";
         ui.hitbox.style.display = "none";
         ui.speech.style.display = "none";
@@ -1453,6 +1516,7 @@
     function closeMiniMeCompletely() {
       isClosed = true;
       stopAllSpeechAudio();
+      if (typeof cleanupMocapOnHide === "function") cleanupMocapOnHide(true);
       ui.canvas.style.display = "none";
       ui.hitbox.style.display = "none";
       ui.speech.style.display = "none";
@@ -1712,7 +1776,19 @@
             titleNode.textContent = `#${idx + 1}: ${dance.name || "Choreography"}`;
             const metaNode = document.createElement("span");
             metaNode.className = "aion-mem-item-meta";
-            metaNode.textContent = `${dance.bpm || 132} BPM • ${dance.builtin ? "Built-in Style" : (dance.source || "Learned Video Dance")}`;
+            if (dance.mocap_1to1) {
+              const durSec = Math.round(Number(dance.duration_sec || 0));
+              const mins = Math.floor(durSec / 60);
+              const secs = String(durSec % 60).padStart(2, "0");
+              const dCnt = Number(dance.dancer_count || 1);
+              const cCnt = Math.max(0, dCnt - 1);
+              metaNode.textContent =
+                `🎯 1:1 Mocap (${mins}:${secs}) • ${dCnt} Dancer${dCnt > 1 ? "s" : ""}` +
+                (cCnt > 0 ? ` (+${cCnt} Shadow Clone${cCnt > 1 ? "s" : ""})` : "") +
+                ` • ${dance.bpm || 132} BPM`;
+            } else {
+              metaNode.textContent = `${dance.bpm || 132} BPM • ${dance.builtin ? "Built-in Style" : (dance.source || "Learned Video Dance")}`;
+            }
             txt.appendChild(titleNode);
             txt.appendChild(metaNode);
 
@@ -1881,37 +1957,104 @@
     scene.add(catGroup);
 
     let mixer = null;
-    const bones = {
-      pelvis: null,
-      spine0: null,
-      spine1: null,
-      spine2: null,
-      spine3: null,
-      neck: null,
-      head: null,
-      jaw: null,
-      tongue1: null,
-      tongue2: null,
-      earL: null,
-      earR: null,
-      clavR: null,
-      armR: null,
-      forearmR: null,
-      handR: null,
-      clavL: null,
-      armL: null,
-      forearmL: null,
-      handL: null,
-      thighR: null,
-      calfR: null,
-      footR: null,
-      thighL: null,
-      calfL: null,
-      footL: null,
-      tail0: null,
-      tail1: null,
-      tail2: null
-    };
+    let primeCatModel = null;
+
+    function createEmptyBoneMap() {
+      return {
+        pelvis: null,
+        spine0: null,
+        spine1: null,
+        spine2: null,
+        spine3: null,
+        neck: null,
+        head: null,
+        jaw: null,
+        tongue1: null,
+        tongue2: null,
+        earL: null,
+        earR: null,
+        clavR: null,
+        armR: null,
+        forearmR: null,
+        handR: null,
+        clavL: null,
+        armL: null,
+        forearmL: null,
+        handL: null,
+        thighR: null,
+        calfR: null,
+        footR: null,
+        thighL: null,
+        calfL: null,
+        footL: null,
+        tail0: null,
+        tail1: null,
+        tail2: null
+      };
+    }
+
+    function populateCatRigBones(model, outBones) {
+      model.traverse((obj) => {
+        if (obj.isMesh && obj.material) {
+          obj.material.side = THREE.DoubleSide;
+        }
+        const n = obj.name || "";
+        if (n.indexOf("cat_bip-Pelvis") !== -1) outBones.pelvis = obj;
+        else if (n.indexOf("cat_bip-Spine_") !== -1) outBones.spine0 = obj;
+        else if (n.indexOf("cat_bip-Spine1") !== -1) outBones.spine1 = obj;
+        else if (n.indexOf("cat_bip-Spine2") !== -1) outBones.spine2 = obj;
+        else if (n.indexOf("cat_bip-Spine3") !== -1) outBones.spine3 = obj;
+        else if (n.indexOf("cat_bip-Neck_") !== -1) outBones.neck = obj;
+        else if (n.indexOf("cat_bip-Head") !== -1) outBones.head = obj;
+        else if (n.indexOf("fst-Xtra01") !== -1) outBones.jaw = obj;
+        else if (n.indexOf("tongue_bone01") !== -1) outBones.tongue1 = obj;
+        else if (n.indexOf("tongue_bone02") !== -1) outBones.tongue2 = obj;
+        else if (n.indexOf("cat_bip-Ponytail1") !== -1) outBones.earL = obj;
+        else if (n.indexOf("cat_bip-Ponytail2") !== -1) outBones.earR = obj;
+        else if (n.indexOf("cat_bip-R-Clavicle") !== -1) outBones.clavR = obj;
+        else if (n.indexOf("cat_bip-R-UpperArm") !== -1) outBones.armR = obj;
+        else if (n.indexOf("cat_bip-R-Forearm") !== -1) outBones.forearmR = obj;
+        else if (n.indexOf("cat_bip-R-Hand") !== -1) outBones.handR = obj;
+        else if (n.indexOf("cat_bip-L-Clavicle") !== -1) outBones.clavL = obj;
+        else if (n.indexOf("cat_bip-L-UpperArm") !== -1) outBones.armL = obj;
+        else if (n.indexOf("cat_bip-L-Forearm") !== -1) outBones.forearmL = obj;
+        else if (n.indexOf("cat_bip-L-Hand") !== -1) outBones.handL = obj;
+        else if (n.indexOf("cat_bip-R-Thigh") !== -1) outBones.thighR = obj;
+        else if (n.indexOf("cat_bip-R-Calf") !== -1) outBones.calfR = obj;
+        else if (n.indexOf("cat_bip-R-Foot") !== -1) outBones.footR = obj;
+        else if (n.indexOf("cat_bip-L-Thigh") !== -1) outBones.thighL = obj;
+        else if (n.indexOf("cat_bip-L-Calf") !== -1) outBones.calfL = obj;
+        else if (n.indexOf("cat_bip-L-Foot") !== -1) outBones.footL = obj;
+        else if (n.indexOf("cat_bip-Tail_") !== -1) outBones.tail0 = obj;
+        else if (n.indexOf("cat_bip-Tail1") !== -1) outBones.tail1 = obj;
+        else if (n.indexOf("cat_bip-Tail2") !== -1) outBones.tail2 = obj;
+        if (obj.quaternion) {
+          obj.userData.bindQuat = obj.quaternion.clone();
+        }
+      });
+
+      // Precompute bind-pose bone direction vectors in parent local space for exact 1:1 3D mocap aiming!
+      const limbPairs = [
+        [outBones.armR, outBones.forearmR],
+        [outBones.forearmR, outBones.handR],
+        [outBones.armL, outBones.forearmL],
+        [outBones.forearmL, outBones.handL],
+        [outBones.thighR, outBones.calfR],
+        [outBones.calfR, outBones.footR],
+        [outBones.thighL, outBones.calfL],
+        [outBones.calfL, outBones.footL]
+      ];
+      limbPairs.forEach(([parentBone, childBone]) => {
+        if (parentBone && childBone && parentBone.userData.bindQuat) {
+          const childDir = childBone.position.clone();
+          if (childDir.lengthSq() < 1e-6) childDir.set(1, 0, 0);
+          else childDir.normalize();
+          parentBone.userData.restDirInParent = childDir.applyQuaternion(parentBone.userData.bindQuat).normalize();
+        }
+      });
+    }
+
+    const bones = createEmptyBoneMap();
 
     if (cfsData && cfsData.glbArrayBuffer) {
       const loader = new THREE.GLTFLoader();
@@ -1932,45 +2075,8 @@
             model.scale.setScalar(scale);
             model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
 
-            model.traverse((obj) => {
-              if (obj.isMesh && obj.material) {
-                obj.material.side = THREE.DoubleSide;
-              }
-              const n = obj.name || "";
-              if (n.indexOf("cat_bip-Pelvis") !== -1) bones.pelvis = obj;
-              else if (n.indexOf("cat_bip-Spine_") !== -1) bones.spine0 = obj;
-              else if (n.indexOf("cat_bip-Spine1") !== -1) bones.spine1 = obj;
-              else if (n.indexOf("cat_bip-Spine2") !== -1) bones.spine2 = obj;
-              else if (n.indexOf("cat_bip-Spine3") !== -1) bones.spine3 = obj;
-              else if (n.indexOf("cat_bip-Neck_") !== -1) bones.neck = obj;
-              else if (n.indexOf("cat_bip-Head") !== -1) bones.head = obj;
-              else if (n.indexOf("fst-Xtra01") !== -1) bones.jaw = obj;
-              else if (n.indexOf("tongue_bone01") !== -1) bones.tongue1 = obj;
-              else if (n.indexOf("tongue_bone02") !== -1) bones.tongue2 = obj;
-              else if (n.indexOf("cat_bip-Ponytail1") !== -1) bones.earL = obj;
-              else if (n.indexOf("cat_bip-Ponytail2") !== -1) bones.earR = obj;
-              else if (n.indexOf("cat_bip-R-Clavicle") !== -1) bones.clavR = obj;
-              else if (n.indexOf("cat_bip-R-UpperArm") !== -1) bones.armR = obj;
-              else if (n.indexOf("cat_bip-R-Forearm") !== -1) bones.forearmR = obj;
-              else if (n.indexOf("cat_bip-R-Hand") !== -1) bones.handR = obj;
-              else if (n.indexOf("cat_bip-L-Clavicle") !== -1) bones.clavL = obj;
-              else if (n.indexOf("cat_bip-L-UpperArm") !== -1) bones.armL = obj;
-              else if (n.indexOf("cat_bip-L-Forearm") !== -1) bones.forearmL = obj;
-              else if (n.indexOf("cat_bip-L-Hand") !== -1) bones.handL = obj;
-              else if (n.indexOf("cat_bip-R-Thigh") !== -1) bones.thighR = obj;
-              else if (n.indexOf("cat_bip-R-Calf") !== -1) bones.calfR = obj;
-              else if (n.indexOf("cat_bip-R-Foot") !== -1) bones.footR = obj;
-              else if (n.indexOf("cat_bip-L-Thigh") !== -1) bones.thighL = obj;
-              else if (n.indexOf("cat_bip-L-Calf") !== -1) bones.calfL = obj;
-              else if (n.indexOf("cat_bip-L-Foot") !== -1) bones.footL = obj;
-              else if (n.indexOf("cat_bip-Tail_") !== -1) bones.tail0 = obj;
-              else if (n.indexOf("cat_bip-Tail1") !== -1) bones.tail1 = obj;
-              else if (n.indexOf("cat_bip-Tail2") !== -1) bones.tail2 = obj;
-              if (obj.quaternion) {
-                obj.userData.bindQuat = obj.quaternion.clone();
-              }
-            });
-
+            populateCatRigBones(model, bones);
+            primeCatModel = model;
             catGroup.add(model);
 
             if (gltf.animations && gltf.animations.length > 0) {
@@ -1983,6 +2089,205 @@
           () => resolve()
         );
       });
+    }
+
+    // ========================================================================
+    // 7B. SHADOW-CAT CLONE POOL ("SCHATTEN-KATZEN-TÄNZER") & 1:1 MOCAP SOLVER
+    // ========================================================================
+    const shadowClones = [];
+    let _spawningClonePromise = null;
+    const SHADOW_CLONE_PALETTE = [
+      { fur: 0x2a1b4e, glow: 0x00f6ff, ring: 0x00f6ff }, // Cyber Cyan Shadow Clone
+      { fur: 0x35164d, glow: 0xff2bd6, ring: 0xff2bd6 }, // Neon Magenta Shadow Clone
+      { fur: 0x1e2554, glow: 0x9d6bff, ring: 0x9d6bff }, // Electric Violet Shadow Clone
+      { fur: 0x16384c, glow: 0x00ffa6, ring: 0x00ffa6 }, // Mint Phantom Shadow Clone
+      { fur: 0x3d1c38, glow: 0xffaa00, ring: 0xffcc33 }  // Gold Aura Shadow Clone
+    ];
+
+    async function spawnOneShadowClone(cloneIndex) {
+      if (!cfsData || !cfsData.glbArrayBuffer) return null;
+      const loader = new THREE.GLTFLoader();
+      const palette = SHADOW_CLONE_PALETTE[cloneIndex % SHADOW_CLONE_PALETTE.length];
+      return new Promise((resolve) => {
+        loader.parse(
+          cfsData.glbArrayBuffer,
+          "",
+          (gltf) => {
+            const cloneGroup = new THREE.Group();
+            cloneGroup.visible = false;
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const size = new THREE.Vector3();
+            const center = new THREE.Vector3();
+            box.getSize(size);
+            box.getCenter(center);
+
+            const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+            const scale = (0.79 / maxDim);
+            model.scale.setScalar(scale);
+            model.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+
+            const cloneBones = createEmptyBoneMap();
+            populateCatRigBones(model, cloneBones);
+
+            const cloneMats = [];
+            model.traverse((obj) => {
+              if (obj.isMesh && obj.material) {
+                const mat = obj.material.clone();
+                mat.side = THREE.DoubleSide;
+                mat.transparent = true;
+                mat.opacity = 0.78;
+                if (mat.color) mat.color.setHex(palette.fur);
+                if (mat.emissive) {
+                  mat.emissive.setHex(palette.glow);
+                  mat.emissiveIntensity = 0.55;
+                }
+                obj.material = mat;
+                cloneMats.push(mat);
+              }
+            });
+
+            // Glowing holographic floor ring under each Shadow-Cat Clone!
+            const ringGeo = new THREE.RingGeometry(0.14, 0.21, 28);
+            const ringMat = new THREE.MeshBasicMaterial({
+              color: palette.ring,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity: 0.72
+            });
+            const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+            ringMesh.rotation.x = -Math.PI * 0.5;
+            ringMesh.position.set(0, -0.37, 0);
+
+            cloneGroup.add(model);
+            cloneGroup.add(ringMesh);
+            scene.add(cloneGroup);
+
+            const entry = {
+              group: cloneGroup,
+              model,
+              bones: cloneBones,
+              cloneMats,
+              ringMat,
+              ringMesh,
+              curScreenX: window.innerWidth * 0.5,
+              curScreenY: window.innerHeight * 0.72,
+              curYaw: 0.0,
+              alpha: 0.0
+            };
+            shadowClones.push(entry);
+            resolve(entry);
+          },
+          () => resolve(null)
+        );
+      });
+    }
+
+    function ensureShadowClonePool(desiredCount) {
+      const clamped = Math.max(0, Math.min(5, desiredCount));
+      if (shadowClones.length >= clamped || _spawningClonePromise) return;
+      _spawningClonePromise = (async () => {
+        while (shadowClones.length < clamped) {
+          await spawnOneShadowClone(shadowClones.length);
+        }
+        _spawningClonePromise = null;
+      })();
+    }
+
+    // Reusable scratch math objects (zero GC churn at 60 FPS!)
+    const _qModelWorld = new THREE.Quaternion();
+    const _qParentWorld = new THREE.Quaternion();
+    const _qSwing = new THREE.Quaternion();
+    const _qDesired = new THREE.Quaternion();
+    const _qTmp = new THREE.Quaternion();
+    const _vTarget = new THREE.Vector3();
+    const _xAxis = new THREE.Vector3(1, 0, 0);
+    const _yAxis = new THREE.Vector3(0, 1, 0);
+    const _zAxis = new THREE.Vector3(0, 0, 1);
+
+    function aimLimbBone1to1(bone, modelWorldQuat, dx, dy, dz, blend) {
+      if (!bone || !bone.parent || !bone.userData.bindQuat || !bone.userData.restDirInParent) return;
+      _vTarget.set(dx, dy, dz);
+      if (_vTarget.lengthSq() < 1e-6) return;
+      _vTarget.normalize().applyQuaternion(modelWorldQuat);
+      bone.parent.getWorldQuaternion(_qParentWorld);
+      _qParentWorld.invert();
+      _vTarget.applyQuaternion(_qParentWorld).normalize();
+
+      _qSwing.setFromUnitVectors(bone.userData.restDirInParent, _vTarget);
+      _qDesired.copy(_qSwing).multiply(bone.userData.bindQuat);
+      if (blend >= 0.999) {
+        bone.quaternion.copy(_qDesired);
+      } else {
+        bone.quaternion.slerp(_qDesired, blend);
+      }
+      bone.updateMatrixWorld(true);
+    }
+
+    function applyMocapPoseVecToCatRig(rigBones, rigModel, p, blend, nowSec) {
+      if (!rigBones || !rigModel || !p || p.length < 32) return;
+      // 1. Reset quadruped walk pose into clean bind pose
+      Object.keys(rigBones).forEach((k) => {
+        const b = rigBones[k];
+        if (b && b.userData && b.userData.bindQuat) {
+          if (blend >= 0.999) b.quaternion.copy(b.userData.bindQuat);
+          else b.quaternion.slerp(b.userData.bindQuat, blend);
+        }
+      });
+
+      const spineLeanX = p[3] || 0;
+      const spinePitch = p[4] || 0;
+      const pelvisRoll = p[5] || 0;
+      const headYaw = p[6] || 0;
+      const headPitch = p[7] || 0;
+
+      // 2. Upright Pelvis, 4-Segment Spine Isolation & Head Aiming
+      if (rigBones.pelvis) {
+        rigBones.pelvis.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, (-1.45 + spinePitch * 0.45) * blend));
+        rigBones.pelvis.quaternion.multiply(_qTmp.setFromAxisAngle(_xAxis, pelvisRoll * 0.65 * blend));
+      }
+      const spChain = [rigBones.spine0, rigBones.spine1, rigBones.spine2, rigBones.spine3];
+      spChain.forEach((sp) => {
+        if (sp) {
+          sp.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, spinePitch * 0.14 * blend));
+          sp.quaternion.multiply(_qTmp.setFromAxisAngle(_xAxis, -spineLeanX * 0.24 * blend));
+        }
+      });
+      if (rigBones.neck) {
+        rigBones.neck.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, (0.15 + headPitch * 0.28) * blend));
+      }
+      if (rigBones.head) {
+        rigBones.head.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, (1.35 + headPitch * 0.72) * blend));
+        rigBones.head.quaternion.multiply(_qTmp.setFromAxisAngle(_xAxis, -headYaw * 0.75 * blend));
+      }
+
+      // 3. Refresh torso world matrices before exact parent-space 3D limb aiming!
+      rigModel.updateMatrixWorld(true);
+      rigModel.getWorldQuaternion(_qModelWorld);
+
+      // 4. 1:1 Arms, Forearms, Thighs & Calves!
+      aimLimbBone1to1(rigBones.armR, _qModelWorld, p[8], p[9], p[10], blend);
+      aimLimbBone1to1(rigBones.forearmR, _qModelWorld, p[11], p[12], p[13], blend);
+      aimLimbBone1to1(rigBones.armL, _qModelWorld, p[14], p[15], p[16], blend);
+      aimLimbBone1to1(rigBones.forearmL, _qModelWorld, p[17], p[18], p[19], blend);
+
+      aimLimbBone1to1(rigBones.thighR, _qModelWorld, p[20], p[21], p[22], blend);
+      aimLimbBone1to1(rigBones.calfR, _qModelWorld, p[23], p[24], p[25], blend);
+      aimLimbBone1to1(rigBones.thighL, _qModelWorld, p[26], p[27], p[28], blend);
+      aimLimbBone1to1(rigBones.calfL, _qModelWorld, p[29], p[30], p[31], blend);
+
+      if (rigBones.footL) {
+        rigBones.footL.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, 0.85 * blend));
+      }
+      if (rigBones.footR) {
+        rigBones.footR.quaternion.multiply(_qTmp.setFromAxisAngle(_zAxis, 0.85 * blend));
+      }
+      if (rigBones.tail0) {
+        rigBones.tail0.quaternion.multiply(_qTmp.setFromAxisAngle(_yAxis, Math.sin(nowSec * 3.4) * 0.28));
+      }
+      if (rigBones.tail1) {
+        rigBones.tail1.quaternion.multiply(_qTmp.setFromAxisAngle(_yAxis, Math.sin(nowSec * 3.4 - 0.6) * 0.32));
+      }
     }
 
     // ========================================================================
@@ -2011,170 +2316,653 @@
       source: "CosmOS 20-Joint K-Pop Dojo"
     };
 
+    // ========================================================================
+    // 8B. LIVE VIDEO 1:1 MULTI-DANCER RIGGING, RECORDING & FULL-SONG REPLAY
+    // ========================================================================
+    const loadedTracksCache = {};
+    let _localFrameGrabCanvas = null;
+    let _localFrameGrabCtx = null;
+
+    const mocapLiveState = {
+      active: false,
+      sessionId: "",
+      videoEl: null,
+      choreoName: "",
+      videoSourceDesc: "",
+      showRigOverlay: true,
+      prevDancers: [],
+      currDancers: [],
+      lastRecvSec: 0,
+      intervalSec: 0.11,
+      lastDetectSec: 0,
+      lastCheckpointSec: 0,
+      recordedFrames: 0,
+      recordedDurationSec: 0,
+      endedListener: null
+    };
+
+    const mocapReplayState = {
+      active: false,
+      track: null,
+      elapsedSec: 0,
+      durationSec: 0
+    };
+
+    function formatClockMMSS(sec) {
+      const s = Math.max(0, Math.round(Number(sec) || 0));
+      const m = Math.floor(s / 60);
+      const r = String(s % 60).padStart(2, "0");
+      return `${String(m).padStart(2, "0")}:${r}`;
+    }
+
+    function updateDanceButtonsRecordingVisual(isRec) {
+      document.querySelectorAll(".aion-dance-btn").forEach((b) => {
+        if (isRec) {
+          b.classList.add("recording");
+          b.textContent = "⏹";
+          b.title = "Save Full 1:1 Choreography & Stop Scanning";
+        } else {
+          b.classList.remove("recording");
+          b.textContent = "💃";
+          b.title = "Dance & 1:1 Motion-Capture Live Video Choreography!";
+        }
+      });
+    }
+
+    function hideMocapHudAndBar() {
+      if (ui.mocapHudCanvas) {
+        ui.mocapHudCanvas.style.display = "none";
+        const ctx = ui.mocapHudCanvas.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, ui.mocapHudCanvas.width, ui.mocapHudCanvas.height);
+      }
+      if (ui.mocapBar) {
+        ui.mocapBar.classList.remove("active");
+      }
+      updateDanceButtonsRecordingVisual(false);
+    }
+
+    const COCO_SKELETON_EDGES = [
+      [5, 6, "#00ffc8"],
+      [5, 11, "#00ffc8"],
+      [6, 12, "#00ffc8"],
+      [11, 12, "#00ffc8"],
+      [0, 5, "#72ffdf"],
+      [0, 6, "#72ffdf"],
+      [6, 8, "#ff2bd6"],
+      [8, 10, "#ff2bd6"],
+      [12, 14, "#ff2bd6"],
+      [14, 16, "#ff2bd6"],
+      [5, 7, "#9d6bff"],
+      [7, 9, "#9d6bff"],
+      [11, 13, "#9d6bff"],
+      [13, 15, "#9d6bff"]
+    ];
+
+    function drawMocapRigOverlayOnVideo(vid, dancers, leadIdx) {
+      if (!ui.mocapHudCanvas || !mocapLiveState.showRigOverlay || !vid) {
+        if (ui.mocapHudCanvas) ui.mocapHudCanvas.style.display = "none";
+        return;
+      }
+      const r = vid.getBoundingClientRect();
+      if (r.width < 60 || r.height < 60 || r.bottom < 0 || r.top > window.innerHeight) {
+        ui.mocapHudCanvas.style.display = "none";
+        return;
+      }
+      ui.mocapHudCanvas.style.display = "block";
+      ui.mocapHudCanvas.style.left = `${Math.round(r.left)}px`;
+      ui.mocapHudCanvas.style.top = `${Math.round(r.top)}px`;
+      ui.mocapHudCanvas.style.width = `${Math.round(r.width)}px`;
+      ui.mocapHudCanvas.style.height = `${Math.round(r.height)}px`;
+
+      const cw = Math.max(120, Math.round(r.width));
+      const ch = Math.max(90, Math.round(r.height));
+      if (ui.mocapHudCanvas.width !== cw || ui.mocapHudCanvas.height !== ch) {
+        ui.mocapHudCanvas.width = cw;
+        ui.mocapHudCanvas.height = ch;
+      }
+      const ctx = ui.mocapHudCanvas.getContext("2d");
+      ctx.clearRect(0, 0, cw, ch);
+      if (!dancers || dancers.length === 0) return;
+
+      let cloneRank = 1;
+      dancers.forEach((d, idx) => {
+        const kpts = d.kpts;
+        if (!Array.isArray(kpts) || kpts.length < 17) return;
+        const isLead = idx === leadIdx;
+
+        // Draw glowing 17-bone anatomical rig attached directly to the dancer!
+        ctx.lineWidth = isLead ? 3.0 : 2.2;
+        ctx.lineCap = "round";
+        COCO_SKELETON_EDGES.forEach(([i, j, col]) => {
+          const ki = kpts[i];
+          const kj = kpts[j];
+          if (ki && kj && ki[2] > 0.16 && kj[2] > 0.16) {
+            ctx.strokeStyle = col;
+            ctx.shadowColor = col;
+            ctx.shadowBlur = isLead ? 9 : 6;
+            ctx.beginPath();
+            ctx.moveTo(ki[0] * cw, ki[1] * ch);
+            ctx.lineTo(kj[0] * cw, kj[1] * ch);
+            ctx.stroke();
+          }
+        });
+
+        ctx.shadowBlur = 0;
+        for (let k = 0; k < 17; k++) {
+          const pt = kpts[k];
+          if (pt && pt[2] > 0.18) {
+            ctx.fillStyle = isLead ? "#00ffc8" : "#ff66ea";
+            ctx.beginPath();
+            ctx.arc(pt[0] * cw, pt[1] * ch, isLead ? 3.8 : 3.0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        // Tag label above dancer's head
+        const headPt = kpts[0] && kpts[0][2] > 0.15 ? kpts[0] : kpts[5];
+        if (headPt) {
+          const lx = Math.max(46, Math.min(cw - 46, headPt[0] * cw));
+          const ly = Math.max(18, headPt[1] * ch - 18);
+          const tag = isLead ? "★ AION 1:1" : `CLONE #${cloneRank++}`;
+          ctx.font = "bold 10.5px monospace";
+          const tw = ctx.measureText(tag).width + 10;
+          ctx.fillStyle = isLead ? "rgba(0, 255, 200, 0.88)" : "rgba(45, 16, 78, 0.88)";
+          ctx.fillRect(lx - tw * 0.5, ly - 11, tw, 15);
+          ctx.fillStyle = isLead ? "#03161d" : "#ff85f2";
+          ctx.textAlign = "center";
+          ctx.fillText(tag, lx, ly);
+        }
+      });
+    }
+
+    async function grabVideoFrameJpegBase64(vid) {
+      if (!vid) return null;
+      // 1. Fast direct page <video> -> downscaled 320px JPEG
+      if (vid.videoWidth > 32 && vid.videoHeight > 32) {
+        try {
+          if (!_localFrameGrabCanvas) {
+            _localFrameGrabCanvas = document.createElement("canvas");
+            _localFrameGrabCtx = _localFrameGrabCanvas.getContext("2d", { willReadFrequently: false });
+          }
+          const aspect = vid.videoWidth / vid.videoHeight;
+          const outW = aspect >= 1.0 ? 320 : Math.max(180, Math.round(320 * aspect));
+          const outH = aspect >= 1.0 ? Math.max(180, Math.round(320 / aspect)) : 320;
+          _localFrameGrabCanvas.width = outW;
+          _localFrameGrabCanvas.height = outH;
+          _localFrameGrabCtx.drawImage(vid, 0, 0, outW, outH);
+          const dataUrl = _localFrameGrabCanvas.toDataURL("image/jpeg", 0.64);
+          if (dataUrl && dataUrl.length > 200) return dataUrl;
+        } catch (corsErr) {
+          // Cross-origin video (e.g. x.com / video.twimg.com): fall through to privileged extension capture!
+        }
+      }
+
+      // 2. Zero-CORS Privileged Extension Content-Script / Visible-Tab Capture!
+      const r = vid.getBoundingClientRect();
+      const prevHudVis = ui.mocapHudCanvas ? ui.mocapHudCanvas.style.visibility : "";
+      if (ui.mocapHudCanvas) ui.mocapHudCanvas.style.visibility = "hidden";
+      const extSnap = await bridgeRequest(
+        "__CAPTURE_VIDEO_FRAME__",
+        "POST",
+        { rect: { left: r.left, top: r.top, width: r.width, height: r.height } },
+        1800
+      );
+      if (ui.mocapHudCanvas) ui.mocapHudCanvas.style.visibility = prevHudVis;
+      if (extSnap && extSnap.ok && extSnap.data && extSnap.data.image) {
+        return extSnap.data.image;
+      }
+      return null;
+    }
+
+    async function persistMocapSessionCheckpoint(sessionId, name, source) {
+      if (!sessionId) return null;
+      const res = await bridgeRequest(
+        "/api/save_choreo_track",
+        "POST",
+        { session_id: sessionId, name, source },
+        6500
+      );
+      if (res && res.ok && res.data && res.data.status === "ok") {
+        if (Array.isArray(res.data.learned_facts)) {
+          learnedFactsList = res.data.learned_facts;
+          learnedFactsCount = learnedFactsList.length;
+        }
+        if (Array.isArray(res.data.learned_choreographies)) {
+          learnedChoreoLibrary = res.data.learned_choreographies;
+        }
+        if (res.data.choreo && res.data.choreo.track_id) {
+          delete loadedTracksCache[res.data.choreo.track_id];
+          activeChoreo = res.data.choreo;
+        }
+        updateAllGenerationBadges();
+        if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
+          renderMemoryInspectorDrawer();
+        }
+        return res.data.choreo;
+      }
+      return null;
+    }
+
+    async function stopLiveVideoMocapAndSave(announceInChat = true) {
+      const wasActive = mocapLiveState.active;
+      const wasReplay = mocapReplayState.active;
+      const sessId = mocapLiveState.sessionId;
+      const cName = mocapLiveState.choreoName;
+      const cSrc = mocapLiveState.videoSourceDesc;
+      const framesCnt = mocapLiveState.recordedFrames;
+
+      mocapLiveState.active = false;
+      mocapReplayState.active = false;
+      mocapReplayState.track = null;
+      if (mocapLiveState.videoEl && mocapLiveState.endedListener) {
+        mocapLiveState.videoEl.removeEventListener("ended", mocapLiveState.endedListener);
+      }
+      if (mocapLiveState.videoEl) {
+        mocapLiveState.videoEl.removeAttribute("data-aion-mocap-target");
+      }
+      mocapLiveState.videoEl = null;
+      mocapLiveState.endedListener = null;
+      hideMocapHudAndBar();
+
+      isDancing = false;
+      danceTimer = 0;
+      roamMode = 2;
+      roamTimer = 3.5;
+
+      if (wasActive && sessId && framesCnt > 0) {
+        const savedChoreo = await persistMocapSessionCheckpoint(sessId, cName, cSrc);
+        if (announceInChat && savedChoreo) {
+          const durStr = formatClockMMSS(savedChoreo.duration_sec);
+          const msg =
+            `✅ Saved full 1:1 Motion-Capture Choreography '${savedChoreo.name}' (${durStr}, ` +
+            `${savedChoreo.dancer_count} Dancer${savedChoreo.dancer_count > 1 ? "s" : ""}, ` +
+            `${savedChoreo.shadow_clones} Shadow Clone${savedChoreo.shadow_clones === 1 ? "" : "s"}, ` +
+            `${savedChoreo.frame_count} keyframes at ${savedChoreo.bpm} BPM)! Click ▶ in 💃 Dances anytime to replay the entire song!`;
+          appendChatMessage("aion", msg);
+          speakEnglishWithLipSync(msg, speechTextEl);
+        }
+      } else if (wasReplay && announceInChat) {
+        const msg = `⏹ Stopped choreography replay.`;
+        appendChatMessage("aion", msg);
+      }
+    }
+
+    cleanupMocapOnHide = function (saveIfRec) {
+      stopLiveVideoMocapAndSave(false).catch(() => {});
+    };
+
+    if (ui.mocapBarEyeBtn) {
+      ui.mocapBarEyeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        mocapLiveState.showRigOverlay = !mocapLiveState.showRigOverlay;
+        ui.mocapBarEyeBtn.textContent = mocapLiveState.showRigOverlay ? "👁 Rigs ON" : "👁 Rigs OFF";
+        if (!mocapLiveState.showRigOverlay && ui.mocapHudCanvas) {
+          ui.mocapHudCanvas.style.display = "none";
+        }
+      });
+    }
+
+    if (ui.mocapBarStopBtn) {
+      ui.mocapBarStopBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        stopLiveVideoMocapAndSave(true);
+      });
+    }
+
+    async function startLiveVideoMocapSession(vid, choreoName, videoSourceDesc) {
+      // Stop any previous replay or scan cleanly
+      if (mocapLiveState.active || mocapReplayState.active) {
+        await stopLiveVideoMocapAndSave(false);
+      }
+
+      const sessId = "mocap_" + Date.now() + "_" + Math.floor(Math.random() * 9999);
+      vid.setAttribute("data-aion-mocap-target", "1");
+
+      const r = vid.getBoundingClientRect();
+      // Place Prime Aion near lower-center of video with ample left/right stage room for up to 5 Shadow-Cat Clones!
+      const vidCenterX = r.width > 80 ? r.left + r.width * 0.5 : window.innerWidth * 0.5;
+      targetX = Math.max(260, Math.min(window.innerWidth - 260, vidCenterX));
+      if (r.bottom < window.innerHeight - 105) {
+        targetY = Math.min(window.innerHeight - 82, r.bottom + 72);
+      } else {
+        targetY = Math.min(window.innerHeight - 82, Math.max(180, window.innerHeight - 92));
+      }
+      screenX = targetX;
+      screenY = targetY;
+
+      mocapLiveState.active = true;
+      mocapLiveState.sessionId = sessId;
+      mocapLiveState.videoEl = vid;
+      mocapLiveState.choreoName = choreoName;
+      mocapLiveState.videoSourceDesc = videoSourceDesc;
+      mocapLiveState.prevDancers = [];
+      mocapLiveState.currDancers = [];
+      mocapLiveState.lastRecvSec = performance.now() * 0.001;
+      mocapLiveState.intervalSec = 0.11;
+      mocapLiveState.lastDetectSec = performance.now() * 0.001;
+      mocapLiveState.lastCheckpointSec = performance.now() * 0.001;
+      mocapLiveState.recordedFrames = 0;
+      mocapLiveState.recordedDurationSec = 0;
+
+      const onEnded = () => {
+        if (mocapLiveState.active && mocapLiveState.sessionId === sessId) {
+          stopLiveVideoMocapAndSave(true);
+        }
+      };
+      mocapLiveState.endedListener = onEnded;
+      vid.addEventListener("ended", onEnded);
+
+      if (ui.mocapBar) {
+        ui.mocapBar.classList.add("active");
+        if (ui.mocapBarEyeBtn) ui.mocapBarEyeBtn.style.display = "inline-flex";
+        if (ui.mocapBarStatus) {
+          ui.mocapBarStatus.textContent = `🔴 1:1 MOCAP SCANNING...`;
+        }
+      }
+      updateDanceButtonsRecordingVisual(true);
+
+      isDancing = true;
+      danceTimer = 3600.0; // Continuous for full song length (3m, 5m, 10m+) until video ends or stopped!
+      roamMode = 3;
+      roamTimer = 3600.0;
+
+      // Asynchronous continuous downscaled video pose scanning loop
+      let isFirstFrame = true;
+      (async function runScanLoop() {
+        while (mocapLiveState.active && mocapLiveState.sessionId === sessId) {
+          if (isMinimized || isClosed || !document.contains(vid)) {
+            await stopLiveVideoMocapAndSave(false);
+            break;
+          }
+          if (vid.ended) {
+            await stopLiveVideoMocapAndSave(true);
+            break;
+          }
+          if (vid.paused) {
+            await new Promise((r) => setTimeout(r, 220));
+            continue;
+          }
+
+          const loopStart = performance.now();
+          const jpegB64 = await grabVideoFrameJpegBase64(vid);
+          if (jpegB64) {
+            const scanRes = await bridgeRequest(
+              "/api/pose_scan_frame",
+              "POST",
+              {
+                image: jpegB64,
+                session_id: sessId,
+                video_time: Number(vid.currentTime || 0),
+                title: choreoName,
+                source: videoSourceDesc,
+                reset: isFirstFrame
+              },
+              3200
+            );
+            isFirstFrame = false;
+
+            if (!mocapLiveState.active || mocapLiveState.sessionId !== sessId) break;
+
+            if (scanRes && scanRes.ok && scanRes.data && scanRes.data.status === "ok") {
+              const d = scanRes.data;
+              const nowS = performance.now() * 0.001;
+              const dtRecv = Math.max(0.05, Math.min(0.35, nowS - mocapLiveState.lastRecvSec));
+              mocapLiveState.intervalSec = dtRecv;
+              mocapLiveState.lastRecvSec = nowS;
+              mocapLiveState.recordedFrames = Number(d.recorded_frames || 0);
+              mocapLiveState.recordedDurationSec = Number(d.recorded_duration_sec || 0);
+              if (d.bpm) activeChoreo.bpm = Number(d.bpm);
+
+              if (Array.isArray(d.dancers) && d.dancers.length > 0) {
+                mocapLiveState.prevDancers = mocapLiveState.currDancers.length > 0 ? mocapLiveState.currDancers : d.dancers;
+                mocapLiveState.currDancers = d.dancers;
+                mocapLiveState.lastDetectSec = nowS;
+                ensureShadowClonePool(Math.max(0, d.dancers.length - 1));
+                const leadIdx = Math.floor((d.dancers.length - 1) / 2);
+                drawMocapRigOverlayOnVideo(vid, d.dancers, leadIdx);
+              } else {
+                drawMocapRigOverlayOnVideo(vid, [], 0);
+              }
+
+              const curCnt = mocapLiveState.currDancers.length || 1;
+              const cloneCnt = Math.max(0, curCnt - 1);
+              if (ui.mocapBarStatus) {
+                ui.mocapBarStatus.textContent =
+                  `🔴 1:1 MOCAP ${formatClockMMSS(mocapLiveState.recordedDurationSec)} • ` +
+                  `${curCnt} Dancer${curCnt > 1 ? "s" : ""}` +
+                  (cloneCnt > 0 ? ` (+${cloneCnt} Shadow Clone${cloneCnt > 1 ? "s" : ""})` : "") +
+                  ` • ${activeChoreo.bpm || 132} BPM`;
+              }
+
+              // Auto-save checkpoint every 8 seconds so full 3+ minute choreographies are safely persisted!
+              if (mocapLiveState.recordedFrames >= 8 && nowS - mocapLiveState.lastCheckpointSec >= 8.0) {
+                mocapLiveState.lastCheckpointSec = nowS;
+                persistMocapSessionCheckpoint(sessId, choreoName, videoSourceDesc).catch(() => {});
+              }
+            }
+          }
+
+          const spentMs = performance.now() - loopStart;
+          const waitMs = Math.max(18, 92 - spentMs);
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+      })();
+    }
+
+    async function loadAndStartMocapTrackReplay(danceObj) {
+      if (!danceObj || !danceObj.track_id) return false;
+      if (mocapLiveState.active) {
+        await stopLiveVideoMocapAndSave(false);
+      }
+
+      let track = loadedTracksCache[danceObj.track_id] || null;
+      if (!track) {
+        const res = await bridgeRequest(`/api/choreo_track?id=${encodeURIComponent(danceObj.track_id)}`, "GET", null, 6000);
+        if (res && res.ok && res.data && res.data.track && Array.isArray(res.data.track.frames) && res.data.track.frames.length > 0) {
+          track = res.data.track;
+          loadedTracksCache[danceObj.track_id] = track;
+        }
+      }
+      if (!track || !track.frames || track.frames.length === 0) return false;
+
+      activeChoreo = danceObj;
+      mocapReplayState.active = true;
+      mocapReplayState.track = track;
+      mocapReplayState.elapsedSec = 0.0;
+      mocapReplayState.durationSec = Math.max(2.0, Number(track.duration_sec || 22.0));
+
+      const maxDancersInTrack = Math.max(1, Number(track.dancer_count || 1));
+      ensureShadowClonePool(maxDancersInTrack - 1);
+
+      // Center Prime Aion comfortably if multiple Shadow Clones are spawning
+      if (maxDancersInTrack > 1) {
+        screenX = Math.max(220, Math.min(window.innerWidth - 220, screenX));
+        targetX = screenX;
+      }
+
+      if (ui.mocapBar) {
+        ui.mocapBar.classList.add("active");
+        if (ui.mocapBarEyeBtn) ui.mocapBarEyeBtn.style.display = "none";
+        if (ui.mocapBarStopBtn) ui.mocapBarStopBtn.textContent = "⏹ Stop";
+        if (ui.mocapBarStatus) {
+          ui.mocapBarStatus.textContent =
+            `▶ 1:1 REPLAY 00:00 / ${formatClockMMSS(mocapReplayState.durationSec)} • ` +
+            `${maxDancersInTrack} Dancer${maxDancersInTrack > 1 ? "s" : ""}`;
+        }
+      }
+
+      isDancing = true;
+      danceTimer = mocapReplayState.durationSec;
+      roamMode = 3;
+      roamTimer = mocapReplayState.durationSec;
+      return true;
+    }
+
+    function sampleReplayDancerPosesAt(track, tSec) {
+      const frames = track.frames;
+      if (!frames || frames.length === 0) return [];
+      if (frames.length === 1 || tSec <= frames[0].t) return frames[0].d || [];
+      const last = frames[frames.length - 1];
+      if (tSec >= last.t) return last.d || [];
+
+      // Binary search frame interval [lo, hi]
+      let lo = 0;
+      let hi = frames.length - 1;
+      while (lo + 1 < hi) {
+        const mid = (lo + hi) >> 1;
+        if (frames[mid].t <= tSec) lo = mid;
+        else hi = mid;
+      }
+      const fA = frames[lo];
+      const fB = frames[hi];
+      const span = Math.max(0.001, fB.t - fA.t);
+      const alpha = Math.max(0.0, Math.min(1.0, (tSec - fA.t) / span));
+      const dA = fA.d || [];
+      const dB = fB.d || [];
+      const count = dB.length > 0 ? dB.length : dA.length;
+      const out = [];
+      for (let i = 0; i < count; i++) {
+        const pA = dA[Math.min(i, Math.max(0, dA.length - 1))];
+        const pB = dB[Math.min(i, Math.max(0, dB.length - 1))];
+        if (pA && pB && pA.length >= 32 && pB.length >= 32) {
+          const lerped = new Array(32);
+          for (let j = 0; j < 32; j++) {
+            lerped[j] = pA[j] + (pB[j] - pA[j]) * alpha;
+          }
+          out.push(lerped);
+        } else if (pB || pA) {
+          out.push(pB || pA);
+        }
+      }
+      return out;
+    }
+
     async function triggerDanceAndLearnFromVideo(userMsg = "") {
       const videos = Array.from(document.querySelectorAll("video")).filter((v) => {
         const r = v.getBoundingClientRect();
         return r.width > 80 && r.height > 80 && r.bottom > 40 && r.top < window.innerHeight - 40;
       });
 
-      let learnedFromVideo = false;
-      let videoSourceDesc = "";
-
       if (videos.length > 0) {
-        // Pick the playing video or the largest visible video on screen
         const vid = videos.find((v) => !v.paused) || videos[0];
-        const r = vid.getBoundingClientRect();
 
-        // Walk right beside the video to dance alongside it!
-        const placeLeft = r.left > 180;
-        targetX = placeLeft ? Math.max(120, r.left - 85) : Math.min(window.innerWidth - 120, r.right + 85);
-        targetY = Math.min(window.innerHeight - 110, Math.max(160, r.top + r.height * 0.55));
-        screenX = targetX;
-        screenY = targetY;
-
-        // Find nearby caption / tweet / title text for this video
-        let contextLabel = document.title || location.hostname;
+        // Extract clean video / song title
+        let contextLabel = (document.title || location.hostname)
+          .replace(/^\(\d+\)\s*/, "")
+          .replace(/\s*-\s*YouTube\s*$/i, "")
+          .replace(/\s*\/\s*X\s*$/i, "")
+          .trim();
         const container = vid.closest("article, [data-testid='tweet'], .ytd-watch-flexy, div");
         if (container) {
-          const txtEl = container.querySelector("[data-testid='tweetText'], h1, h2, h3, span");
-          if (txtEl && txtEl.innerText) {
-            contextLabel = txtEl.innerText.trim().replace(/\s+/g, " ").substring(0, 46);
+          const txtEl = container.querySelector("[data-testid='tweetText'], h1 yt-formatted-string, h1");
+          if (txtEl && txtEl.innerText && txtEl.innerText.trim().length > 2) {
+            contextLabel = txtEl.innerText.trim().replace(/\s+/g, " ").substring(0, 54);
           }
         }
-        videoSourceDesc = `"${contextLabel}" (${location.hostname})`;
-
-        // Sample optical flow across 6 body zones if CORS-accessible, or extract live video cadence signature
-        let armEnergy = 1.35;
-        let hipEnergy = 1.20;
-        let legEnergy = 1.25;
-        let detectedBpm = 132;
-        try {
-          const off = document.createElement("canvas");
-          off.width = 32;
-          off.height = 32;
-          const ctx = off.getContext("2d", { willReadFrequently: true });
-          ctx.drawImage(vid, 0, 0, 32, 32);
-          const f1 = ctx.getImageData(0, 0, 32, 32).data;
-          await new Promise((res) => setTimeout(res, 90));
-          ctx.drawImage(vid, 0, 0, 32, 32);
-          const f2 = ctx.getImageData(0, 0, 32, 32).data;
-
-          let topDiff = 0;
-          let midDiff = 0;
-          let botDiff = 0;
-          for (let y = 0; y < 32; y++) {
-            for (let x = 0; x < 32; x++) {
-              const idx = (y * 32 + x) * 4;
-              const d = Math.abs(f2[idx] - f1[idx]) + Math.abs(f2[idx + 1] - f1[idx + 1]) + Math.abs(f2[idx + 2] - f1[idx + 2]);
-              if (y < 11) topDiff += d;
-              else if (y < 22) midDiff += d;
-              else botDiff += d;
-            }
-          }
-          armEnergy = Math.max(0.95, Math.min(1.65, 1.0 + (topDiff / 35000)));
-          hipEnergy = Math.max(0.90, Math.min(1.55, 0.95 + (midDiff / 35000)));
-          legEnergy = Math.max(0.90, Math.min(1.55, 0.95 + (botDiff / 35000)));
-          detectedBpm = Math.round(118 + ((topDiff + midDiff + botDiff) % 28));
-        } catch (corsErr) {
-          // Cross-origin CDN video (e.g. video.twimg.com): derive signature from live video timing & dimensions
-          const seed = Math.round((vid.currentTime || 1.7) * 100) + (vid.videoWidth || 720) + (vid.videoHeight || 1280);
-          detectedBpm = 124 + (seed % 22);
-          armEnergy = Number((1.18 + ((seed % 35) * 0.01)).toFixed(2));
-          hipEnergy = Number((1.12 + (((seed >> 2) % 30) * 0.01)).toFixed(2));
-          legEnergy = Number((1.15 + (((seed >> 3) % 30) * 0.01)).toFixed(2));
-        }
+        const videoSourceDesc = `"${contextLabel}" (${location.hostname})`;
+        const choreoName = `Live Video Choreo: ${contextLabel.substring(0, 48)}`;
 
         activeChoreo = {
-          name: `Live Video Choreo: ${contextLabel.substring(0, 32)}`,
-          bpm: detectedBpm,
-          hipSway: Number(hipEnergy.toFixed(2)),
-          spineWave: Number(((armEnergy + hipEnergy) * 0.52).toFixed(2)),
-          armWave: Number(armEnergy.toFixed(2)),
-          legBounce: Number(legEnergy.toFixed(2)),
+          name: choreoName,
+          bpm: 132,
+          hipSway: 1.25,
+          spineWave: 1.25,
+          armWave: 1.35,
+          legBounce: 1.25,
           spinRate: 1.15,
+          mocap_1to1: true,
           source: videoSourceDesc
         };
-        learnedFromVideo = true;
 
-        // Add cumulatively to local repertoire without overwriting previous choreographies
-        const existIdx = learnedChoreoLibrary.findIndex((c) => c.name === activeChoreo.name);
-        if (existIdx >= 0) {
-          learnedChoreoLibrary[existIdx] = activeChoreo;
-        } else {
-          learnedChoreoLibrary.push(activeChoreo);
-        }
-        updateAllGenerationBadges();
+        if (ui.mocapBarStopBtn) ui.mocapBarStopBtn.textContent = "⏹ Save & Stop";
+        await startLiveVideoMocapSession(vid, choreoName, videoSourceDesc);
 
-        // Save learned choreography permanently to AION Soul Memory!
-        bridgeRequest("/api/learn_choreo", "POST", { choreo: activeChoreo }, 5000)
-          .then((res) => {
-            if (res && res.ok && res.data) {
-              if (Array.isArray(res.data.learned_facts)) {
-                learnedFactsList = res.data.learned_facts;
-                learnedFactsCount = learnedFactsList.length;
-              } else if (res.data.learned_facts_count !== undefined) {
-                learnedFactsCount = Number(res.data.learned_facts_count);
-              }
-              if (Array.isArray(res.data.learned_choreographies)) {
-                learnedChoreoLibrary = res.data.learned_choreographies;
-              }
-              updateAllGenerationBadges();
-              if (activeInspectorTab && typeof renderMemoryInspectorDrawer === "function") {
-                renderMemoryInspectorDrawer();
-              }
-            }
-          })
-          .catch(() => {});
-      } else {
-        const lower = userMsg.toLowerCase();
-        const activeBuiltins = getActiveBuiltinChoreos();
-        const allRepertoire = activeBuiltins.concat(learnedChoreoLibrary);
-        // Check if user requested a specific previously learned choreography or style by keyword
-        const matchedLearned = learnedChoreoLibrary.find((c) =>
-          lower && lower.length > 3 && c.name && c.name.toLowerCase().split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
+        return (
+          `💃 Live 1:1 Multi-Dancer Motion-Capture activated on ${videoSourceDesc}! ` +
+          `I am continuously scanning the downscaled video, attaching live 17-joint skeletal rigs onto every dancer, ` +
+          `spawning Shadow-Cat Clones whenever multiple dancers appear on stage, and recording the entire full-length song choreography ` +
+          `into my permanent memory! Let the whole song play (or click '⏹ Save & Stop' anytime)!`
         );
-        if (matchedLearned) {
-          activeChoreo = matchedLearned;
-        } else if (lower.includes("breakdance") || lower.includes("spin")) {
-          activeChoreo = BUILTIN_CHOREOGRAPHIES[1];
-        } else if (lower.includes("hip") || lower.includes("groove")) {
-          activeChoreo = BUILTIN_CHOREOGRAPHIES[2];
-        } else if (lower.includes("meovv") || lower.includes("go hard")) {
-          activeChoreo = BUILTIN_CHOREOGRAPHIES[0];
-        } else if (allRepertoire.length > 0) {
-          // Cycle through her entire cumulative repertoire (learned video dances + active built-in styles)
-          activeChoreo = allRepertoire[choreoCycleIndex % allRepertoire.length];
-          choreoCycleIndex = (choreoCycleIndex + 1) % allRepertoire.length;
-        }
       }
 
-      isDancing = true;
-      danceTimer = 22.0;
-      roamMode = 3;
-      roamTimer = 22.0;
+      // No visible video on page: replay from cumulative repertoire!
+      const lower = userMsg.toLowerCase();
+      const activeBuiltins = getActiveBuiltinChoreos();
+      const allRepertoire = learnedChoreoLibrary.concat(activeBuiltins);
+      const matchedLearned = learnedChoreoLibrary.find((c) =>
+        lower && lower.length > 3 && c.name && c.name.toLowerCase().split(/\s+/).some((w) => w.length > 3 && lower.includes(w))
+      );
+
+      let chosen = null;
+      if (matchedLearned) {
+        chosen = matchedLearned;
+      } else if (lower.includes("breakdance") || lower.includes("spin")) {
+        chosen = BUILTIN_CHOREOGRAPHIES[1];
+      } else if (lower.includes("hip") || lower.includes("groove")) {
+        chosen = BUILTIN_CHOREOGRAPHIES[2];
+      } else if (allRepertoire.length > 0) {
+        chosen = allRepertoire[choreoCycleIndex % allRepertoire.length];
+        choreoCycleIndex = (choreoCycleIndex + 1) % allRepertoire.length;
+      } else {
+        chosen = BUILTIN_CHOREOGRAPHIES[0];
+      }
+
+      activeChoreo = chosen;
       const totalDances = getTotalDancesCount();
 
-      if (learnedFromVideo) {
-        return (
-          `💃 Oh yeah! I just scanned the live video ${videoSourceDesc}, copied its motion rhythm (${activeChoreo.bpm} BPM, ` +
-          `Arm-Wave ${activeChoreo.armWave}x, Hip-Sway ${activeChoreo.hipSway}x), and added '${activeChoreo.name}' to my permanent dance repertoire ` +
-          `(I now know ${totalDances} choreographies total and never forget any of them!). Watch me dance it right next to the video!`
-        );
+      if (chosen && chosen.mocap_1to1 && chosen.track_id) {
+        const ok = await loadAndStartMocapTrackReplay(chosen);
+        if (ok) {
+          const durStr = formatClockMMSS(mocapReplayState.durationSec);
+          const dCnt = Number(chosen.dancer_count || 1);
+          const cCnt = Math.max(0, dCnt - 1);
+          return (
+            `💃 Replaying full 1:1 Motion-Capture Choreography '${chosen.name}' (${durStr}, ` +
+            `${dCnt} Dancer${dCnt > 1 ? "s" : ""}` +
+            (cCnt > 0 ? ` — spawning ${cCnt} Shadow-Cat Clone${cCnt > 1 ? "s" : ""}!` : "") +
+            `, ${chosen.bpm || 132} BPM)!`
+          );
+        }
       }
+
+      mocapReplayState.active = false;
+      hideMocapHudAndBar();
+      isDancing = true;
+      danceTimer = 25.0;
+      roamMode = 3;
+      roamTimer = 25.0;
       return (
         `💃 Let's go hard! Launching '${activeChoreo.name}' (${activeChoreo.bpm} BPM, from ${activeChoreo.source || "my memory"}) ` +
-        `out of my cumulative repertoire of ${totalDances} memorized choreographies! Click 💃 again to cycle through all my learned dances, ` +
-        `or open any video on YouTube/X and click 💃 to teach me a brand-new choreography!`
+        `out of my cumulative repertoire of ${totalDances} memorized choreographies! Open any dance video on YouTube/X and click 💃 ` +
+        `to scan & record a full 3+ minute multi-dancer 1:1 choreography with Shadow-Cat Clones!`
       );
     }
 
-    launchSpecificChoreoCallback = function (danceObj) {
+    launchSpecificChoreoCallback = async function (danceObj) {
       if (!danceObj) return;
+      if (danceObj.mocap_1to1 && danceObj.track_id) {
+        const ok = await loadAndStartMocapTrackReplay(danceObj);
+        if (ok) {
+          const durStr = formatClockMMSS(mocapReplayState.durationSec);
+          const dCnt = Number(danceObj.dancer_count || 1);
+          const cCnt = Math.max(0, dCnt - 1);
+          const msg =
+            `💃 Replaying full 1:1 Mocap '${danceObj.name}' (${durStr}, ${dCnt} Dancer${dCnt > 1 ? "s" : ""}` +
+            (cCnt > 0 ? ` + ${cCnt} Shadow Clones` : "") +
+            `, ${danceObj.bpm || 132} BPM)!`;
+          appendChatMessage("aion", msg);
+          speakEnglishWithLipSync(msg, speechTextEl);
+          return;
+        }
+      }
+      mocapReplayState.active = false;
+      if (mocapLiveState.active) await stopLiveVideoMocapAndSave(false);
+      hideMocapHudAndBar();
       activeChoreo = danceObj;
       isDancing = true;
-      danceTimer = 22.0;
+      danceTimer = 25.0;
       roamMode = 3;
-      roamTimer = 22.0;
+      roamTimer = 25.0;
       const msg = `💃 Dancing '${activeChoreo.name}' (${activeChoreo.bpm || 132} BPM)!`;
       appendChatMessage("aion", msg);
       speakEnglishWithLipSync(msg, speechTextEl);
@@ -2466,6 +3254,10 @@
     document.querySelectorAll(".aion-dance-btn").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
+        if (mocapLiveState.active) {
+          stopLiveVideoMocapAndSave(true);
+          return;
+        }
         handleUserSend("Copy and learn the dance choreography from the live video on this page and dance Go Hard!");
       });
     });
@@ -2520,14 +3312,62 @@
       lastTime = now;
 
       if (isDancing) {
-        danceTimer -= dt;
-        if (danceTimer <= 0) {
-          isDancing = false;
-          roamMode = 2;
-          roamTimer = 3.0;
+        if (mocapLiveState.active) {
+          danceTimer = 3600.0; // Stay active for the entire video duration!
+        } else if (mocapReplayState.active && mocapReplayState.track) {
+          mocapReplayState.elapsedSec += dt;
+          danceTimer = mocapReplayState.durationSec - mocapReplayState.elapsedSec;
+          if (ui.mocapBarStatus) {
+            const dCnt = Math.max(1, Number(mocapReplayState.track.dancer_count || 1));
+            ui.mocapBarStatus.textContent =
+              `▶ 1:1 REPLAY ${formatClockMMSS(mocapReplayState.elapsedSec)} / ${formatClockMMSS(mocapReplayState.durationSec)} • ` +
+              `${dCnt} Dancer${dCnt > 1 ? "s" : ""}`;
+          }
+          if (danceTimer <= 0) {
+            mocapReplayState.active = false;
+            mocapReplayState.track = null;
+            hideMocapHudAndBar();
+            isDancing = false;
+            roamMode = 2;
+            roamTimer = 3.0;
+          }
+        } else {
+          danceTimer -= dt;
+          if (danceTimer <= 0) {
+            isDancing = false;
+            roamMode = 2;
+            roamTimer = 3.0;
+          }
         }
       }
       danceBlend += ((isDancing ? 1.0 : 0.0) - danceBlend) * 0.14;
+
+      // Determine active 1:1 multi-dancer pose vectors (Live Video Scan OR Full-Song Keyframe Replay)
+      let activeDancerPoses = null;
+      if (isDancing && mocapLiveState.active && mocapLiveState.currDancers.length > 0) {
+        const alpha = Math.max(0.0, Math.min(1.0, (now - mocapLiveState.lastRecvSec) / Math.max(0.04, mocapLiveState.intervalSec)));
+        const curr = mocapLiveState.currDancers;
+        const prev = mocapLiveState.prevDancers;
+        activeDancerPoses = curr.map((d, i) => {
+          const pB = d.p;
+          const pA = prev[i] && prev[i].p ? prev[i].p : pB;
+          if (!pA || !pB || pB.length < 32) return pB;
+          const out = new Array(32);
+          for (let j = 0; j < 32; j++) {
+            out[j] = pA[j] + (pB[j] - pA[j]) * alpha;
+          }
+          return out;
+        });
+      } else if (isDancing && mocapReplayState.active && mocapReplayState.track) {
+        const sampled = sampleReplayDancerPosesAt(mocapReplayState.track, mocapReplayState.elapsedSec);
+        if (sampled && sampled.length > 0) {
+          activeDancerPoses = sampled;
+        }
+      }
+
+      const hasMocapPoses = Boolean(activeDancerPoses && activeDancerPoses.length > 0);
+      const leadDancerIdx = hasMocapPoses ? Math.floor((activeDancerPoses.length - 1) / 2) : 0;
+      const leadPoseVec = hasMocapPoses ? activeDancerPoses[leadDancerIdx] : null;
 
       roamTimer -= dt;
       if (roamTimer <= 0 && !isDancing) {
@@ -2563,10 +3403,13 @@
 
         const desiredYaw = Math.max(-0.68, Math.min(0.68, (dx / dist) * 0.62));
         currentRotY += (desiredYaw - currentRotY) * 0.09;
+      } else if (isDancing && leadPoseVec) {
+        // 1:1 Body Spin / Yaw directly from tracked dancer (supports 0..180..360 deg turns!)
+        const targetYaw = leadPoseVec[2] || 0.0;
+        currentRotY += (targetYaw - currentRotY) * 0.28;
       } else if (isDancing) {
         const beatOmega = ((activeChoreo.bpm || 132) / 60.0) * Math.PI * 2.0;
         const barPhase = (now * ((activeChoreo.bpm || 132) / 60.0)) % 8.0;
-        // Smooth 360-degree K-Pop idol stage spin on beats 6..8 of every 8-count bar!
         const spinAdd = barPhase > 6.0 ? ((barPhase - 6.0) / 2.0) * Math.PI * 2.0 : 0.0;
         const grooveYaw = Math.sin(now * beatOmega * 0.5) * 0.52 + spinAdd;
         currentRotY += (grooveYaw - currentRotY) * 0.22;
@@ -2584,16 +3427,21 @@
       const ndcY = 1.0 - (screenY / window.innerHeight) * 2.0;
 
       const beatFreq = ((activeChoreo.bpm || 132) / 60.0) * Math.PI * 2.0;
-      const danceJumpY = danceBlend > 0.01
-        ? Math.abs(Math.sin(now * beatFreq * 0.5)) * 0.16 * (activeChoreo.legBounce || 1.2) * danceBlend
-        : 0.0;
-      const danceSideStepX = danceBlend > 0.01
-        ? Math.sin(now * beatFreq * 0.25) * 0.14 * (activeChoreo.hipSway || 1.2) * danceBlend
-        : 0.0;
+      let danceJumpY = 0.0;
+      let danceSideStepX = 0.0;
+      if (leadPoseVec && danceBlend > 0.01) {
+        danceJumpY = (leadPoseVec[1] || 0.0) * 0.36 * danceBlend;
+        danceSideStepX = (leadPoseVec[0] || 0.0) * 0.22 * danceBlend;
+      } else if (danceBlend > 0.01) {
+        danceJumpY = Math.abs(Math.sin(now * beatFreq * 0.5)) * 0.16 * (activeChoreo.legBounce || 1.2) * danceBlend;
+        danceSideStepX = Math.sin(now * beatFreq * 0.25) * 0.14 * (activeChoreo.hipSway || 1.2) * danceBlend;
+      }
 
       catGroup.position.set(ndcX * halfW + danceSideStepX, ndcY * halfH + danceJumpY, 0);
       catGroup.rotation.y = currentRotY;
-      catGroup.rotation.z = danceBlend > 0.01 ? Math.sin(now * beatFreq * 0.5) * 0.11 * danceBlend : 0.0;
+      catGroup.rotation.z = leadPoseVec
+        ? -(leadPoseVec[3] || 0.0) * 0.18 * danceBlend
+        : (danceBlend > 0.01 ? Math.sin(now * beatFreq * 0.5) * 0.11 * danceBlend : 0.0);
 
       ui.hitbox.style.left = `${screenX}px`;
       ui.hitbox.style.top = `${screenY}px`;
@@ -2611,14 +3459,94 @@
         mixer.update(dt * animRate);
       }
 
-      const xAxis = new THREE.Vector3(1, 0, 0);
-      const yAxis = new THREE.Vector3(0, 1, 0);
-      const zAxis = new THREE.Vector3(0, 0, 1);
+      const xAxis = _xAxis;
+      const yAxis = _yAxis;
+      const zAxis = _zAxis;
 
       // ======================================================================
-      // 52-BONE BIPEDAL 2-LEGGED UPRIGHT K-POP / VIDEO CHOREOGRAPHY ENGINE
+      // 52-BONE BIPEDAL 1:1 MOCAP + SHADOW-CAT CLONES + PROCEDURAL FALLBACK
       // ======================================================================
-      if (danceBlend > 0.01) {
+      if (danceBlend > 0.01 && hasMocapPoses && primeCatModel) {
+        // 1. Apply 1:1 Lead Dancer Rig directly to Prime Mini-Me AION!
+        applyMocapPoseVecToCatRig(bones, primeCatModel, leadPoseVec, danceBlend, now);
+
+        // 2. Drive Shadow-Cat Clones ("Schatten-Katzen-Tänzer") for all extra dancers (dancerCount - 1)!
+        const cloneEntries = [];
+        for (let di = 0; di < activeDancerPoses.length; di++) {
+          if (di !== leadDancerIdx) {
+            cloneEntries.push({ pose: activeDancerPoses[di], slotOffset: di - leadDancerIdx });
+          }
+        }
+        ensureShadowClonePool(cloneEntries.length);
+
+        const stageSpreadPx = Math.min(360, Math.max(180, window.innerWidth * 0.28));
+        const leadStageX = leadPoseVec[0] || 0.0;
+
+        for (let ci = 0; ci < shadowClones.length; ci++) {
+          const clone = shadowClones[ci];
+          if (ci < cloneEntries.length) {
+            const cp = cloneEntries[ci].pose;
+            const slotOffset = cloneEntries[ci].slotOffset;
+            clone.alpha += (1.0 - clone.alpha) * 0.18;
+            clone.group.visible = true;
+
+            // Relative horizontal stage formation around Prime Aion with guaranteed non-overlapping slot separation!
+            const rawStageDx = ((cp[0] || 0.0) - leadStageX) * stageSpreadPx;
+            const minSlotDx = slotOffset * 90;
+            const relDxPx = slotOffset < 0 ? Math.min(minSlotDx, rawStageDx) : Math.max(minSlotDx, rawStageDx);
+            const desiredCloneX = Math.max(55, Math.min(window.innerWidth - 55, screenX + relDxPx));
+            const desiredCloneY = screenY;
+            clone.curScreenX += (desiredCloneX - clone.curScreenX) * 0.22;
+            clone.curScreenY += (desiredCloneY - clone.curScreenY) * 0.22;
+            clone.curYaw += ((cp[2] || 0.0) - clone.curYaw) * 0.26;
+
+            const cNdcX = (clone.curScreenX / window.innerWidth) * 2.0 - 1.0;
+            const cNdcY = 1.0 - (clone.curScreenY / window.innerHeight) * 2.0;
+            const cJumpY = (cp[1] || 0.0) * 0.36 * danceBlend;
+
+            clone.group.position.set(cNdcX * halfW, cNdcY * halfH + cJumpY, -0.15);
+            clone.group.rotation.y = clone.curYaw;
+            clone.group.rotation.z = -(cp[3] || 0.0) * 0.18 * danceBlend;
+
+            // Pulse holographic Shadow-Clone emissive aura & concert ring on the beat!
+            const beatPulse = 0.52 + 0.28 * Math.sin(now * beatFreq + ci * 0.9);
+            clone.cloneMats.forEach((m) => {
+              m.opacity = 0.78 * clone.alpha * danceBlend;
+              if (m.emissiveIntensity !== undefined) m.emissiveIntensity = beatPulse;
+            });
+            clone.ringMat.opacity = 0.70 * clone.alpha * danceBlend;
+            clone.ringMesh.scale.setScalar(0.92 + 0.12 * Math.sin(now * beatFreq * 0.5 + ci));
+
+            applyMocapPoseVecToCatRig(clone.bones, clone.model, cp, 1.0, now + ci * 0.3);
+          } else {
+            clone.alpha += (0.0 - clone.alpha) * 0.22;
+            if (clone.alpha < 0.03) {
+              clone.group.visible = false;
+            } else {
+              clone.cloneMats.forEach((m) => {
+                m.opacity = 0.78 * clone.alpha;
+              });
+              clone.ringMat.opacity = 0.70 * clone.alpha;
+            }
+          }
+        }
+      } else {
+        // Hide any Shadow-Cat Clones smoothly when not in multi-dancer mocap mode
+        for (let ci = 0; ci < shadowClones.length; ci++) {
+          const clone = shadowClones[ci];
+          clone.alpha += (0.0 - clone.alpha) * 0.22;
+          if (clone.alpha < 0.03) {
+            clone.group.visible = false;
+          } else {
+            clone.cloneMats.forEach((m) => {
+              m.opacity = 0.78 * clone.alpha;
+            });
+            clone.ringMat.opacity = 0.70 * clone.alpha;
+          }
+        }
+      }
+
+      if (danceBlend > 0.01 && !hasMocapPoses) {
         const w = ((activeChoreo.bpm || 132) / 60.0) * Math.PI * 2.0;
         const hipAmp = (activeChoreo.hipSway || 1.2) * danceBlend;
         const spineAmp = (activeChoreo.spineWave || 1.2) * danceBlend;
