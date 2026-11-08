@@ -2345,7 +2345,8 @@
       active: false,
       track: null,
       elapsedSec: 0,
-      durationSec: 0
+      durationSec: 0,
+      startTimeSec: 0
     };
 
     function formatClockMMSS(sec) {
@@ -2485,12 +2486,12 @@
             _localFrameGrabCtx = _localFrameGrabCanvas.getContext("2d", { willReadFrequently: false });
           }
           const aspect = vid.videoWidth / vid.videoHeight;
-          const outW = aspect >= 1.0 ? 320 : Math.max(180, Math.round(320 * aspect));
-          const outH = aspect >= 1.0 ? Math.max(180, Math.round(320 / aspect)) : 320;
+          const outW = aspect >= 1.0 ? 256 : Math.max(160, Math.round(256 * aspect));
+          const outH = aspect >= 1.0 ? Math.max(144, Math.round(256 / aspect)) : 256;
           _localFrameGrabCanvas.width = outW;
           _localFrameGrabCanvas.height = outH;
           _localFrameGrabCtx.drawImage(vid, 0, 0, outW, outH);
-          const dataUrl = _localFrameGrabCanvas.toDataURL("image/jpeg", 0.64);
+          const dataUrl = _localFrameGrabCanvas.toDataURL("image/jpeg", 0.54);
           if (dataUrl && dataUrl.length > 200) return dataUrl;
         } catch (corsErr) {
           // Cross-origin video (e.g. x.com / video.twimg.com): fall through to privileged extension capture!
@@ -2743,7 +2744,7 @@
           }
 
           const spentMs = performance.now() - loopStart;
-          const waitMs = Math.max(18, 92 - spentMs);
+          const waitMs = Math.max(4, 24 - spentMs);
           await new Promise((r) => setTimeout(r, waitMs));
         }
       })();
@@ -2768,6 +2769,7 @@
       activeChoreo = danceObj;
       mocapReplayState.active = true;
       mocapReplayState.track = track;
+      mocapReplayState.startTimeSec = performance.now() * 0.001;
       mocapReplayState.elapsedSec = 0.0;
       mocapReplayState.durationSec = Math.max(2.0, Number(track.duration_sec || 22.0));
 
@@ -2817,6 +2819,8 @@
       const fB = frames[hi];
       const span = Math.max(0.001, fB.t - fA.t);
       const alpha = Math.max(0.0, Math.min(1.0, (tSec - fA.t) / span));
+      // Cubic Hermite smoothstep curve for silky smooth 60 FPS interpolation!
+      const smoothAlpha = alpha * alpha * (3.0 - 2.0 * alpha);
       const dA = fA.d || [];
       const dB = fB.d || [];
       const count = dB.length > 0 ? dB.length : dA.length;
@@ -2827,7 +2831,7 @@
         if (pA && pB && pA.length >= 32 && pB.length >= 32) {
           const lerped = new Array(32);
           for (let j = 0; j < 32; j++) {
-            lerped[j] = pA[j] + (pB[j] - pA[j]) * alpha;
+            lerped[j] = pA[j] + (pB[j] - pA[j]) * smoothAlpha;
           }
           out.push(lerped);
         } else if (pB || pA) {
@@ -3315,8 +3319,9 @@
         if (mocapLiveState.active) {
           danceTimer = 3600.0; // Stay active for the entire video duration!
         } else if (mocapReplayState.active && mocapReplayState.track) {
-          mocapReplayState.elapsedSec += dt;
-          danceTimer = mocapReplayState.durationSec - mocapReplayState.elapsedSec;
+          const replayNow = performance.now() * 0.001;
+          mocapReplayState.elapsedSec = replayNow - (mocapReplayState.startTimeSec || replayNow);
+          danceTimer = Math.max(0.0, mocapReplayState.durationSec - mocapReplayState.elapsedSec);
           if (ui.mocapBarStatus) {
             const dCnt = Math.max(1, Number(mocapReplayState.track.dancer_count || 1));
             ui.mocapBarStatus.textContent =

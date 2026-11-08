@@ -37,12 +37,12 @@
     if (vid && vid.videoWidth > 32 && vid.videoHeight > 32) {
       try {
         const aspect = vid.videoWidth / vid.videoHeight;
-        const outW = aspect >= 1.0 ? 320 : Math.max(180, Math.round(320 * aspect));
-        const outH = aspect >= 1.0 ? Math.max(180, Math.round(320 / aspect)) : 320;
+        const outW = aspect >= 1.0 ? 256 : Math.max(160, Math.round(256 * aspect));
+        const outH = aspect >= 1.0 ? Math.max(144, Math.round(256 / aspect)) : 256;
         _captureCanvas.width = outW;
         _captureCanvas.height = outH;
         _captureCtx.drawImage(vid, 0, 0, outW, outH);
-        const jpegDataUrl = _captureCanvas.toDataURL("image/jpeg", 0.64);
+        const jpegDataUrl = _captureCanvas.toDataURL("image/jpeg", 0.54);
         if (jpegDataUrl && jpegDataUrl.length > 200) {
           return { ok: true, status: 200, data: { image: jpegDataUrl, method: "direct_video" } };
         }
@@ -82,12 +82,12 @@
           const sh = Math.min(img.naturalHeight - sy, Math.round(rect.height * scaleY));
           if (sw > 32 && sh > 32) {
             const aspect = sw / sh;
-            const outW = aspect >= 1.0 ? 320 : Math.max(180, Math.round(320 * aspect));
-            const outH = aspect >= 1.0 ? Math.max(180, Math.round(320 / aspect)) : 320;
+            const outW = aspect >= 1.0 ? 256 : Math.max(160, Math.round(256 * aspect));
+            const outH = aspect >= 1.0 ? Math.max(144, Math.round(256 / aspect)) : 256;
             _captureCanvas.width = outW;
             _captureCanvas.height = outH;
             _captureCtx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-            const croppedUrl = _captureCanvas.toDataURL("image/jpeg", 0.64);
+            const croppedUrl = _captureCanvas.toDataURL("image/jpeg", 0.54);
             return { ok: true, status: 200, data: { image: croppedUrl, method: "tab_crop" } };
           }
         }

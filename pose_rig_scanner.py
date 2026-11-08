@@ -58,8 +58,8 @@ def _get_movenet_session():
     with _model_lock:
         if _movenet_sess is None:
             so = ort.SessionOptions()
-            so.intra_op_num_threads = 3
-            so.inter_op_num_threads = 1
+            so.intra_op_num_threads = 6
+            so.inter_op_num_threads = 2
             so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             _movenet_sess = ort.InferenceSession(
                 MOVENET_ONNX_PATH,
@@ -463,6 +463,7 @@ class PoseRecordingSession:
         self.motion_samples: List[Tuple[float, float]] = []
         self.estimated_bpm = 132
         self.frame_counter = 0
+        self.empty_detections_streak = 0
 
     def update_with_detections(self, detections: List[Dict], video_time: float) -> List[Dict]:
         now = time.time()
@@ -706,8 +707,13 @@ def scan_video_frame_base64(
     sess = get_or_create_session(session_id, title=title, source=source, reset=reset_session)
 
     detections = _detect_movenet(img)
-    # Periodic high-res YOLOv8n-pose fallback when wide-stage shots look tiny to MoveNet
-    if not detections and (sess.frame_counter % 5 == 0):
+    if not detections:
+        sess.empty_detections_streak += 1
+    else:
+        sess.empty_detections_streak = 0
+
+    # Rare fallback: only if MoveNet has 0 detections for over 30 frames (e.g. extreme wide shot)
+    if not detections and sess.empty_detections_streak >= 30 and (sess.frame_counter % 15 == 0):
         detections = _detect_yolov8_fallback(img)
 
     live_dancers = sess.update_with_detections(detections, video_time=video_time)
