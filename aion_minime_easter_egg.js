@@ -2332,8 +2332,9 @@
       showRigOverlay: true,
       prevDancers: [],
       currDancers: [],
+      renderDancers: [],
       lastRecvSec: 0,
-      intervalSec: 0.11,
+      intervalSec: 0.06,
       lastDetectSec: 0,
       lastCheckpointSec: 0,
       recordedFrames: 0,
@@ -2553,6 +2554,9 @@
       const framesCnt = mocapLiveState.recordedFrames;
 
       mocapLiveState.active = false;
+      mocapLiveState.prevDancers = [];
+      mocapLiveState.currDancers = [];
+      mocapLiveState.renderDancers = [];
       mocapReplayState.active = false;
       mocapReplayState.track = null;
       if (mocapLiveState.videoEl && mocapLiveState.endedListener) {
@@ -2638,8 +2642,9 @@
       mocapLiveState.videoSourceDesc = videoSourceDesc;
       mocapLiveState.prevDancers = [];
       mocapLiveState.currDancers = [];
+      mocapLiveState.renderDancers = [];
       mocapLiveState.lastRecvSec = performance.now() * 0.001;
-      mocapLiveState.intervalSec = 0.11;
+      mocapLiveState.intervalSec = 0.06;
       mocapLiveState.lastDetectSec = performance.now() * 0.001;
       mocapLiveState.lastCheckpointSec = performance.now() * 0.001;
       mocapLiveState.recordedFrames = 0;
@@ -2707,7 +2712,7 @@
             if (scanRes && scanRes.ok && scanRes.data && scanRes.data.status === "ok") {
               const d = scanRes.data;
               const nowS = performance.now() * 0.001;
-              const dtRecv = Math.max(0.05, Math.min(0.35, nowS - mocapLiveState.lastRecvSec));
+              const dtRecv = Math.max(0.035, Math.min(0.28, nowS - mocapLiveState.lastRecvSec));
               mocapLiveState.intervalSec = dtRecv;
               mocapLiveState.lastRecvSec = nowS;
               mocapLiveState.recordedFrames = Number(d.recorded_frames || 0);
@@ -2715,14 +2720,17 @@
               if (d.bpm) activeChoreo.bpm = Number(d.bpm);
 
               if (Array.isArray(d.dancers) && d.dancers.length > 0) {
-                mocapLiveState.prevDancers = mocapLiveState.currDancers.length > 0 ? mocapLiveState.currDancers : d.dancers;
+                mocapLiveState.prevDancers = mocapLiveState.renderDancers.length > 0
+                  ? mocapLiveState.renderDancers
+                  : (mocapLiveState.currDancers.length > 0 ? mocapLiveState.currDancers : d.dancers);
                 mocapLiveState.currDancers = d.dancers;
                 mocapLiveState.lastDetectSec = nowS;
                 ensureShadowClonePool(Math.max(0, d.dancers.length - 1));
-                const leadIdx = Math.floor((d.dancers.length - 1) / 2);
-                drawMocapRigOverlayOnVideo(vid, d.dancers, leadIdx);
               } else {
-                drawMocapRigOverlayOnVideo(vid, [], 0);
+                mocapLiveState.prevDancers = mocapLiveState.renderDancers.length > 0
+                  ? mocapLiveState.renderDancers
+                  : mocapLiveState.currDancers;
+                mocapLiveState.currDancers = [];
               }
 
               const curCnt = mocapLiveState.currDancers.length || 1;
@@ -2744,7 +2752,7 @@
           }
 
           const spentMs = performance.now() - loopStart;
-          const waitMs = Math.max(4, 24 - spentMs);
+          const waitMs = Math.max(1, 10 - spentMs);
           await new Promise((r) => setTimeout(r, waitMs));
         }
       })();
@@ -3350,19 +3358,63 @@
       // Determine active 1:1 multi-dancer pose vectors (Live Video Scan OR Full-Song Keyframe Replay)
       let activeDancerPoses = null;
       if (isDancing && mocapLiveState.active && mocapLiveState.currDancers.length > 0) {
-        const alpha = Math.max(0.0, Math.min(1.0, (now - mocapLiveState.lastRecvSec) / Math.max(0.04, mocapLiveState.intervalSec)));
+        const rawAlpha = (now - mocapLiveState.lastRecvSec) / Math.max(0.035, mocapLiveState.intervalSec);
+        const alpha = Math.max(0.0, Math.min(1.0, rawAlpha));
+        // Cubic Hermite smoothstep curve for silky 60 FPS transitions
+        const smoothAlpha = alpha * alpha * (3.0 - 2.0 * alpha);
+        // Momentum continuation if next network frame is delayed: prevents cats/rigs from freezing dead
+        const inertiaExtra = Math.max(0.0, Math.min(0.20, (rawAlpha - 1.0) * 0.38));
+
         const curr = mocapLiveState.currDancers;
         const prev = mocapLiveState.prevDancers;
+
+        // 1. Interpolate 32-float 3D pose vectors for Prime Aion and Shadow-Cat Clones
         activeDancerPoses = curr.map((d, i) => {
           const pB = d.p;
           const pA = prev[i] && prev[i].p ? prev[i].p : pB;
           if (!pA || !pB || pB.length < 32) return pB;
           const out = new Array(32);
           for (let j = 0; j < 32; j++) {
-            out[j] = pA[j] + (pB[j] - pA[j]) * alpha;
+            const v = pB[j] - pA[j];
+            out[j] = pA[j] + v * smoothAlpha + v * inertiaExtra;
           }
           return out;
         });
+
+        // 2. Interpolate 17 COCO 2D keypoints for 60 FPS video HUD skeleton overlay
+        const interpDancers = curr.map((d, i) => {
+          const kB = d.kpts;
+          const kA = prev[i] && prev[i].kpts && prev[i].kpts.length === 17 ? prev[i].kpts : kB;
+          if (!kB || kB.length < 17) return d;
+          const outKpts = new Array(17);
+          for (let k = 0; k < 17; k++) {
+            const ptB = kB[k];
+            const ptA = kA[k] || ptB;
+            const vx = ptB[0] - ptA[0];
+            const vy = ptB[1] - ptA[1];
+            outKpts[k] = [
+              ptA[0] + vx * smoothAlpha + vx * inertiaExtra,
+              ptA[1] + vy * smoothAlpha + vy * inertiaExtra,
+              ptB[2]
+            ];
+          }
+          return {
+            id: d.id,
+            rank: d.rank,
+            box: d.box,
+            p: activeDancerPoses[i] || d.p,
+            kpts: outKpts
+          };
+        });
+        mocapLiveState.renderDancers = interpDancers;
+
+        // 3. Render glowing anatomical rigs onto video canvas at 60 FPS!
+        if (mocapLiveState.showRigOverlay && mocapLiveState.videoEl) {
+          const leadIdx = Math.floor((interpDancers.length - 1) / 2);
+          drawMocapRigOverlayOnVideo(mocapLiveState.videoEl, interpDancers, leadIdx);
+        }
+      } else if (isDancing && mocapLiveState.active && mocapLiveState.showRigOverlay && mocapLiveState.videoEl) {
+        drawMocapRigOverlayOnVideo(mocapLiveState.videoEl, [], 0);
       } else if (isDancing && mocapReplayState.active && mocapReplayState.track) {
         const sampled = sampleReplayDancerPosesAt(mocapReplayState.track, mocapReplayState.elapsedSec);
         if (sampled && sampled.length > 0) {
